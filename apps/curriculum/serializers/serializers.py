@@ -1,11 +1,12 @@
 from rest_framework import serializers
 from apps.curriculum.models.models import Curriculum, CurriculumUnit
 from apps.units.serializers.serializers import UnitSerializer
+from apps.units.models import Unit
 
 
 class CurriculumUnitSerializer(serializers.ModelSerializer):
     unit = UnitSerializer(read_only=True)
-    unit_id = serializers.PrimaryKeyRelatedField(queryset=None, source="unit", write_only=True)
+    unit_id = serializers.PrimaryKeyRelatedField(queryset=Unit.objects.all(), source="unit", write_only=True)
 
     class Meta:
         model = CurriculumUnit

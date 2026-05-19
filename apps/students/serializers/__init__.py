@@ -7,6 +7,7 @@ from .serializers import (
     AcademicProgressSerializer,
     StudentEnrollmentSerializer,
 )
+from .student_serializer import StudentSerializer
 
 __all__ = [
     "StudentListSerializer",
@@ -16,4 +17,5 @@ __all__ = [
     "StudentMyProfileSerializer",
     "AcademicProgressSerializer",
     "StudentEnrollmentSerializer",
+    "StudentSerializer",
 ]

@@ -2,7 +2,6 @@
 Admin configuration for timetable app.
 
 Production-level admin interface for:
-- Room management
 - Time slot management
 - Timetable session management with conflict detection
 - Academic terms
@@ -15,108 +14,7 @@ from django.urls import reverse
 from django.db.models import Count, F, Q
 from django.utils.translation import gettext_lazy as _
 
-from apps.timetable.models import Room, TimeSlot, TimetableSession, AcademicTerm, TimetableConflict, TimetableSlot, TimetableUploadBatch
-
-
-@admin.register(Room)
-class RoomAdmin(admin.ModelAdmin):
-    """Admin for Room model."""
-
-    list_display = (
-        "code",
-        "name",
-        "building",
-        "floor",
-        "capacity",
-        "room_type_display",
-        "status_badge",
-        "sessions_count",
-    )
-    list_filter = ("building", "room_type", "status", "capacity", "created_at")
-    search_fields = ("code", "name", "building")
-    readonly_fields = ("id", "sessions_count_readonly", "created_at", "updated_at")
-    ordering = ("building", "floor", "code")
-
-    fieldsets = (
-        (
-            _("Room Information"),
-            {
-                "fields": ("id", "code", "name", "building", "floor", "capacity", "room_type")
-            },
-        ),
-        (
-            _("Status & Details"),
-            {
-                "fields": ("status", "description", "facilities"),
-            },
-        ),
-        (
-            _("Statistics"),
-            {
-                "fields": ("sessions_count_readonly",),
-                "classes": ("collapse",),
-            },
-        ),
-        (
-            _("Timestamps"),
-            {
-                "fields": ("created_at", "updated_at"),
-                "classes": ("collapse",),
-            },
-        ),
-    )
-
-    def room_type_display(self, obj):
-        return obj.get_room_type_display()
-
-    room_type_display.short_description = _("Type")
-
-    def status_badge(self, obj):
-        colors = {
-            "active": "green",
-            "maintenance": "orange",
-            "closed": "red",
-            "unavailable": "gray",
-        }
-        color = colors.get(obj.status, "gray")
-        return format_html(
-            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
-            color,
-            obj.get_status_display(),
-        )
-
-    status_badge.short_description = _("Status")
-
-    def sessions_count(self, obj):
-        count = obj.timetable_sessions.filter(status__in=["scheduled", "active"]).count()
-        return count
-
-    sessions_count.short_description = _("Active Sessions")
-
-    def sessions_count_readonly(self, obj):
-        return obj.timetable_sessions.count()
-
-    sessions_count_readonly.short_description = _("Total Sessions")
-
-    actions = ["mark_active", "mark_maintenance", "mark_closed"]
-
-    def mark_active(self, request, queryset):
-        updated = queryset.update(status="active")
-        self.message_user(request, f"{updated} rooms marked as active")
-
-    mark_active.short_description = _("Mark selected as Active")
-
-    def mark_maintenance(self, request, queryset):
-        updated = queryset.update(status="maintenance")
-        self.message_user(request, f"{updated} rooms marked as Under Maintenance")
-
-    mark_maintenance.short_description = _("Mark selected as Under Maintenance")
-
-    def mark_closed(self, request, queryset):
-        updated = queryset.update(status="closed")
-        self.message_user(request, f"{updated} rooms marked as Closed")
-
-    mark_closed.short_description = _("Mark selected as Closed")
+from apps.timetable.models import TimeSlot, TimetableSession, AcademicTerm, TimetableConflict, TimetableSlot, TimetableUploadBatch
 
 
 @admin.register(TimeSlot)
@@ -496,147 +394,6 @@ class TimetableUploadBatchAdmin(admin.ModelAdmin):
     created_at_short.short_description = _("Uploaded")
 
 
-# Register legacy models
-admin.site.register(TimetableSlot)
-admin.site.register(TimetableConflict)
-
-    
-    def is_current_badge(self, obj):
-        """Display current term status as badge."""
-        if obj.is_current:
-            return format_html(
-                '<span style="background-color: #28a745; color: white; '
-                'padding: 3px 8px; border-radius: 3px;">Current</span>'
-            )
-        return format_html(
-            '<span style="background-color: #6c757d; color: white; '
-            'padding: 3px 8px; border-radius: 3px;">Inactive</span>'
-        )
-    is_current_badge.short_description = "Status"
-
-
-@admin.register(TimetableUploadBatch)
-class TimetableUploadBatchAdmin(admin.ModelAdmin):
-    """Admin for TimetableUploadBatch model."""
-    
-    list_display = (
-        "id",
-        "uploaded_by",
-        "status_badge",
-        "rows_received",
-        "rows_saved",
-        "success_rate",
-        "error_count",
-        "created_at"
-    )
-    list_filter = ("status", "created_at", "uploaded_by")
-    search_fields = ("id", "uploaded_by__email", "source_file")
-    ordering = ("-created_at",)
-    date_hierarchy = "created_at"
-    readonly_fields = (
-        "id",
-        "status",
-        "rows_received",
-        "rows_saved",
-        "validation_errors",
-        "created_at",
-        "updated_at",
-        "slot_count",
-        "error_details"
-    )
-    
-    fieldsets = (
-        ("Upload Information", {
-            "fields": ("id", "uploaded_by", "source_file")
-        }),
-        ("Processing Status", {
-            "fields": ("status", "created_at", "updated_at")
-        }),
-        ("Results Summary", {
-            "fields": (
-                "rows_received",
-                "rows_saved",
-                "slot_count",
-                "error_count"
-            )
-        }),
-        ("Errors & Details", {
-            "fields": ("validation_errors", "error_details"),
-            "classes": ("collapse",)
-        }),
-    )
-    
-    def status_badge(self, obj):
-        """Display processing status as color-coded badge."""
-        colors = {
-            "received": "#0d6efd",
-            "validated": "#0dcaf0",
-            "processed": "#198754",
-            "failed": "#dc3545"
-        }
-        color = colors.get(obj.status, "#6c757d")
-        return format_html(
-            f'<span style="background-color: {color}; color: white; '
-            f'padding: 5px 10px; border-radius: 3px; font-weight: bold;">'
-            f'{obj.get_status_display()}</span>'
-        )
-    status_badge.short_description = "Status"
-    
-    def success_rate(self, obj):
-        """Calculate and display success rate."""
-        if obj.rows_received == 0:
-            return "N/A"
-        rate = round((obj.rows_saved / obj.rows_received) * 100, 1)
-        
-        # Color code: green for 100%, orange for > 50%, red for < 50%
-        if rate == 100:
-            color = "#198754"
-        elif rate >= 50:
-            color = "#ffc107"
-        else:
-            color = "#dc3545"
-        
-        return format_html(
-            f'<span style="color: {color}; font-weight: bold;">{rate}%</span>'
-        )
-    success_rate.short_description = "Success Rate"
-    
-    def error_count(self, obj):
-        """Count validation errors."""
-        count = len(obj.validation_errors) if obj.validation_errors else 0
-        if count == 0:
-            return "—"
-        return format_html(
-            f'<span style="background-color: #dc3545; color: white; '
-            f'padding: 2px 6px; border-radius: 3px;">{count}</span>'
-        )
-    error_count.short_description = "Error Count"
-    
-    def slot_count(self, obj):
-        """Display count of slots created from this batch."""
-        count = obj.slots.count()
-        return format_html(
-            f'<strong>{count}</strong> slots created'
-        )
-    slot_count.short_description = "Slots Created"
-    
-    def error_details(self, obj):
-        """Display error details as formatted list."""
-        if not obj.validation_errors:
-            return "No errors"
-        
-        errors_html = "<ul style='margin-left: 20px;'>"
-        for error in obj.validation_errors[:10]:  # Show first 10
-            errors_html += f"<li>{error}</li>"
-        
-        if len(obj.validation_errors) > 10:
-            errors_html += f"<li><em>... and {len(obj.validation_errors) - 10} more</em></li>"
-        
-        errors_html += "</ul>"
-        return format_html(errors_html)
-    error_details.short_description = "Error Details"
-
-
 @admin.register(TimetableSlot)
 class TimetableSlotAdmin(admin.ModelAdmin):
     """Admin for TimetableSlot model."""
@@ -724,7 +481,6 @@ class TimetableSlotAdmin(admin.ModelAdmin):
     
     def conflict_count(self, obj):
         """Display count of conflicts involving this slot."""
-        from django.db.models import Q
         count = TimetableConflict.objects.filter(
             Q(slot_a=obj) | Q(slot_b=obj)
         ).count()
@@ -741,7 +497,6 @@ class TimetableSlotAdmin(admin.ModelAdmin):
     
     def conflict_status(self, obj):
         """Display conflict status badge."""
-        from django.db.models import Q
         conflicts = TimetableConflict.objects.filter(
             Q(slot_a=obj) | Q(slot_b=obj)
         ).count()
@@ -837,7 +592,6 @@ class TimetableConflictAdmin(admin.ModelAdmin):
     
     def formatted_details(self, obj):
         """Display conflict details as formatted HTML."""
-        import json
         if not obj.details:
             return "No details"
         
@@ -859,4 +613,3 @@ class TimetableConflictAdmin(admin.ModelAdmin):
         except Exception as e:
             return f"Error displaying details: {str(e)}"
     formatted_details.short_description = "Conflict Details"
-

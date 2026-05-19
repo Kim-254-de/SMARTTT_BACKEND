@@ -8,8 +8,8 @@ Pattern: Selectors should be used for all read operations to
 ensure consistent query optimization.
 """
 
-from typing import List, Optional, QuerySet
-from django.db.models import Q, Prefetch, Select Related
+from typing import List, Optional
+from django.db.models import Q, Prefetch, QuerySet
 
 from apps.students.models import Student, AcademicProgress, StudentEnrollment
 

@@ -57,8 +57,13 @@ class CurriculumAPITestCase(APITestCase):
             user=self.student_user,
             program=self.program,
             admission_year=2025,
-            current_year=2,
-            status=Student.Status.ACTIVE,
+            current_study_year=2,
+            academic_status=Student.AcademicStatus.ACTIVE,
+            registration_number="STD-001",
+            first_name="Student",
+            last_name="One",
+            email="student1@uni.edu",
+            department=self.department,
         )
 
         AcademicTerm.objects.create(

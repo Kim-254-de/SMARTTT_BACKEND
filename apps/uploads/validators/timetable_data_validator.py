@@ -18,10 +18,15 @@ class TimetableDataValidator:
             errors.append("Invalid program")
         if not mappings.get("unit"):
             errors.append("Invalid unit")
-        if not mappings.get("lecturer"):
+            
+        lecturer_val = clean_text(row.get("lecturer"))
+        if lecturer_val and not mappings.get("lecturer"):
             errors.append("Invalid lecturer")
-        if not mappings.get("room"):
+            
+        room_val = clean_text(row.get("room"))
+        if room_val and room_val.upper() != "TBA" and not mappings.get("room"):
             errors.append("Invalid room")
+            
         if not mappings.get("time_slot"):
             errors.append("Invalid time slot")
 

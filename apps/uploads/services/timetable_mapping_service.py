@@ -36,7 +36,9 @@ class TimetableMappingService:
             return None
         queryset = Unit.objects.filter(code__iexact=value)
         if program:
-            queryset = queryset.filter(department=program.department)
+            dept_queryset = queryset.filter(department=program.department)
+            if dept_queryset.exists():
+                return dept_queryset.first()
         return queryset.first()
 
     @staticmethod
@@ -87,6 +89,9 @@ class TimetableMappingService:
     def build_mapping(row: dict) -> dict:
         department = TimetableMappingService.resolve_department(row)
         program = TimetableMappingService.resolve_program(row, department)
+        if not department and program:
+            department = program.department
+            
         unit = TimetableMappingService.resolve_unit(row, program)
         lecturer = TimetableMappingService.resolve_lecturer(row, department)
         room = TimetableMappingService.resolve_room(row)

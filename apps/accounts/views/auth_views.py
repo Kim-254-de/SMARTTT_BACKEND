@@ -27,7 +27,7 @@ def serialize_user(user):
         "admission_number": user.university_id,
         "course": student.program.name if student and student.program else None,
         "department": student.program.department.name if student and student.program and student.program.department else None,
-        "year_of_study": student.current_year if student else None,
+        "year_of_study": student.current_study_year if student else None,
     }
 
 class RegisterView(APIView):
@@ -46,7 +46,7 @@ class RegisterView(APIView):
 
         if User.objects.filter(email=email).exists() or User.objects.filter(username=email).exists():
             return Response({"detail": "User with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
-        if User.objects.filter(university_id=admission_number).exists():
+        if admission_number and User.objects.filter(university_id=admission_number).exists():
             return Response({"detail": "User with this admission number already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
         name_parts = full_name.split(' ', 1)
@@ -85,11 +85,22 @@ class RegisterView(APIView):
             )
 
             from datetime import datetime
+            import re
+            
+            reg_num = re.sub(r'[^A-Z0-9\-]', '', admission_number.upper()) if admission_number else f"STU-{user.id}"
+            if not reg_num:
+                reg_num = f"STU-{user.id}"
+
             Student.objects.create(
                 user=user,
+                registration_number=reg_num,
+                first_name=first_name or "First",
+                last_name=last_name or "Last",
+                email=email,
+                department=department,
                 program=program,
                 admission_year=datetime.now().year,
-                current_year=year_of_study
+                current_study_year=year_of_study
             )
 
         tokens = get_tokens_for_user(user)
@@ -142,7 +153,7 @@ class ProfileView(APIView):
         student = getattr(user, 'student_profile', None)
         if student:
             if 'year_of_study' in data:
-                student.current_year = data['year_of_study']
+                student.current_study_year = data['year_of_study']
             if 'course' in data and 'department' in data:
                 import re
                 dept_code = re.sub(r'[^A-Z]', '', data['department'].upper())[:20]

@@ -12,17 +12,14 @@ from .timetable_service import (
 )
 
 __all__ = [
-	"TimetableExcelParserService",
-	"TimetableTransformService",
-	"TimetablePersistenceService",
-	"TimetableConflictDetectionService",
-	"TimetableUploadPipelineService",
-	"TimetableSessionService",
-	"TimetableFilterService",
-	"RoomAllocationService",
-	"LecturerScheduleService",
-	"TimetableConflictService",
-]
-	"TimetableConflictDetectionService",
-	"TimetableUploadPipelineService",
+    "TimetableExcelParserService",
+    "TimetableTransformService",
+    "TimetablePersistenceService",
+    "TimetableConflictDetectionService",
+    "TimetableUploadPipelineService",
+    "TimetableSessionService",
+    "TimetableFilterService",
+    "RoomAllocationService",
+    "LecturerScheduleService",
+    "TimetableConflictService",
 ]

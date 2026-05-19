@@ -12,7 +12,7 @@ class StudentEnrollment(BaseModel):
     student = models.ForeignKey(
         "students.Student",
         on_delete=models.CASCADE,
-        related_name="enrollments",
+        related_name="unit_enrollments",
     )
     curriculum_unit = models.ForeignKey(
         "curriculum.CurriculumUnit",
@@ -22,7 +22,7 @@ class StudentEnrollment(BaseModel):
     term = models.ForeignKey(
         "timetable.AcademicTerm",
         on_delete=models.PROTECT,
-        related_name="enrollments",
+        related_name="unit_enrollments",
     )
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.ENROLLED)
     score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)

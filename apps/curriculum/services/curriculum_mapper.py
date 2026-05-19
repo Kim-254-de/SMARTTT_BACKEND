@@ -58,7 +58,7 @@ class CurriculumMapperService:
 
         curriculum = cls.get_curriculum(
             program_id=student.program_id,
-            study_year=student.current_year,
+            study_year=student.current_study_year,
             semester=current_term.semester,
             academic_year=current_term.academic_year,
         )

@@ -28,7 +28,7 @@ class TimetableUploadBatch(BaseModel):
     uploaded_by = models.ForeignKey(
         "accounts.User",
         on_delete=models.PROTECT,
-        related_name="timetable_uploads",
+        related_name="timetable_upload_batches",
     )
     source_file = models.FileField(upload_to="timetable_uploads/%Y/%m/%d")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.RECEIVED)

@@ -21,7 +21,7 @@ from apps.timetable.serializers import (
     TimetableUploadBatchSerializer,
     TimetableUploadBatchDetailedSerializer,
 )
-from apps.timetable.permissions import CanManageTimetable, CanViewOwnTimetable
+from apps.timetable.permissions import CanManageTimetable
 from apps.timetable.services.upload_pipeline import TimetableUploadPipelineService
 from apps.timetable.validators import ExcelFileValidator
 from apps.timetable.utils import (
