@@ -122,6 +122,14 @@ REST_FRAMEWORK = {
 	"PAGE_SIZE": 25,
 }
 
+# Session authentication configuration
+SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "False") == "True"
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SECURE = os.getenv("CSRF_COOKIE_SECURE", "False") == "True"
+CSRF_COOKIE_HTTPONLY = False  # Must be False for CSRF to work with JavaScript
+CSRF_COOKIE_SAMESITE = "Lax"
+
 
 # SIMPLE_JWT settings removed — using Django session authentication
 

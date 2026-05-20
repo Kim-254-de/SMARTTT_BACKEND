@@ -11,6 +11,7 @@ Orchestrates business logic:
 
 from django.db import transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import models
 from rest_framework.exceptions import ValidationError
 
 from apps.timetable.models import TimetableSession, Room, TimeSlot

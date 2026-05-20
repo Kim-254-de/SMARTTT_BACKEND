@@ -38,15 +38,18 @@ Upload an Excel file containing timetable data for processing.
 #### Request
 
 ```bash
+# Using curl with session authentication
 curl -X POST \
-  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "X-CSRFToken: <csrf_token>" \
   -F "file=@timetable.xlsx" \
-  http://localhost:8000/api/timetable/upload/
+  http://localhost:8000/api/v1/uploads/upload/ \
+  -b "sessionid=<session_id>"
 ```
 
 #### Request Headers
-- `Authorization: Bearer {token}` - Required. User must have `timetable.add_timetableuploadbatch` permission
+- `X-CSRFToken: {csrf_token}` - Required for POST requests (session authentication)
 - `Content-Type: multipart/form-data` - Automatically set by curl with -F flag
+- Session cookie must be included (automatically handled by browsers/clients)
 
 #### Request Body
 - `file` (required): Excel file (.xlsx or .xls) with timetable data
@@ -120,8 +123,8 @@ Retrieve list of all timetable uploads with filtering and pagination.
 
 ```bash
 curl -X GET \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  "http://localhost:8000/api/timetable/uploads/?status=processed&page=1"
+  "http://localhost:8000/api/v1/uploads/" \
+  -b "sessionid=<session_id>"
 ```
 
 #### Query Parameters
@@ -168,8 +171,8 @@ Get detailed information about a specific upload batch including all created slo
 
 ```bash
 curl -X GET \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  "http://localhost:8000/api/timetable/uploads/550e8400-e29b-41d4-a716-446655440000/"
+  "http://localhost:8000/api/v1/uploads/550e8400-e29b-41d4-a716-446655440000/" \
+  -b "sessionid=<session_id>"
 ```
 
 #### Response (200 OK)
@@ -216,8 +219,8 @@ Retrieve all timetable slots with advanced filtering.
 
 ```bash
 curl -X GET \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  "http://localhost:8000/api/timetable/slots/?term=550e8400&day_of_week=mon&room=550e8400"
+  "http://localhost:8000/api/v1/timetable/slots/?term=550e8400&day_of_week=mon&room=550e8400" \
+  -b "sessionid=<session_id>"
 ```
 
 #### Query Parameters
@@ -265,8 +268,8 @@ Get detailed information about a specific slot with all related data.
 
 ```bash
 curl -X GET \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  "http://localhost:8000/api/timetable/slots/660e8400-e29b-41d4-a716-446655440000/detailed/"
+  "http://localhost:8000/api/v1/timetable/slots/660e8400-e29b-41d4-a716-446655440000/detailed/" \
+  -b "sessionid=<session_id>"
 ```
 
 #### Response (200 OK)
@@ -305,8 +308,8 @@ Retrieve all detected timetable conflicts with filtering.
 
 ```bash
 curl -X GET \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  "http://localhost:8000/api/timetable/conflicts/?conflict_type=room&term=550e8400"
+  "http://localhost:8000/api/v1/timetable/conflicts/?conflict_type=room&term=550e8400" \
+  -b "sessionid=<session_id>"
 ```
 
 #### Query Parameters
@@ -464,20 +467,18 @@ from pathlib import Path
 
 # Configuration
 API_BASE = "http://localhost:8000/api"
-AUTH_TOKEN = "your_auth_token_here"
+SESSION_ID = "your_session_id_here"  # Get this after logging in
 
-headers = {
-    "Authorization": f"Bearer {AUTH_TOKEN}"
-}
+session = requests.Session()
+session.cookies.set('sessionid', SESSION_ID)
 
 # 1. Upload timetable file
 def upload_timetable(file_path):
     with open(file_path, 'rb') as f:
         files = {'file': f}
-        response = requests.post(
-            f"{API_BASE}/timetable/upload/",
-            files=files,
-            headers=headers
+        response = session.post(
+            f"{API_BASE}/v1/uploads/upload/",
+            files=files
         )
     
     if response.status_code in [200, 201]:
@@ -494,10 +495,9 @@ def list_conflicts(term_id=None):
     if term_id:
         params['term'] = term_id
     
-    response = requests.get(
-        f"{API_BASE}/timetable/conflicts/",
-        params=params,
-        headers=headers
+    response = session.get(
+        f"{API_BASE}/v1/timetable/conflicts/",
+        params=params
     )
     
     if response.status_code == 200:
@@ -510,9 +510,8 @@ def list_conflicts(term_id=None):
 
 # 3. Get upload details
 def get_upload_details(upload_id):
-    response = requests.get(
-        f"{API_BASE}/timetable/uploads/{upload_id}/",
-        headers=headers
+    response = session.get(
+        f"{API_BASE}/v1/uploads/{upload_id}/"
     )
     
     if response.status_code == 200:
@@ -555,10 +554,11 @@ if __name__ == "__main__":
 
 ## Security
 
-- All endpoints require authentication (Bearer token)
+- All endpoints require Django session authentication
+- Automatic session cookies handle authentication
+- CSRF token required for state-changing requests (POST, PATCH, DELETE)
 - Only staff/admin users can upload files
 - Row-level access control for read-only endpoints
-- CSRF protection enabled for unsafe methods
 - File validation prevents malicious uploads
 
 ---
