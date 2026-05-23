@@ -45,7 +45,10 @@ class RegisterView(APIView):
         admission_number = data.get('admission_number')
         course_name = data.get('course')
         department_name = data.get('department')
-        year_of_study = data.get('year_of_study', 1)
+        try:
+            year_of_study = int(data.get('year_of_study', 1))
+        except (ValueError, TypeError):
+            year_of_study = 1
 
         if User.objects.filter(email=email).exists() or User.objects.filter(username=email).exists():
             return Response({"detail": "User with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
@@ -89,9 +92,13 @@ class RegisterView(APIView):
                 name=course_name,
                 defaults={
                     'code': prog_code,
-                    'department': department
+                    'department': department,
+                    'duration_years': max(4, year_of_study)
                 }
             )
+            if program.duration_years < year_of_study:
+                program.duration_years = year_of_study
+                program.save(update_fields=['duration_years'])
 
             reg_num = re.sub(r'[^A-Z0-9\-]', '', admission_number.upper()) if admission_number else f"STU-{user.id}"
             if not reg_num:
@@ -159,7 +166,10 @@ class ProfileView(APIView):
         student = getattr(user, 'student_profile', None)
         if student:
             if 'year_of_study' in data:
-                student.current_study_year = data['year_of_study']
+                try:
+                    student.current_study_year = int(data['year_of_study'])
+                except (ValueError, TypeError):
+                    pass
             if 'course' in data and 'department' in data:
                 dept_code = re.sub(r'[^A-Z]', '', data['department'].upper())[:20]
                 if not dept_code: dept_code = data['department'].upper()[:20]
@@ -172,10 +182,18 @@ class ProfileView(APIView):
                 prog_code = re.sub(r'[^A-Z]', '', data['course'].upper())[:30]
                 if not prog_code: prog_code = data['course'].upper()[:30]
                 
+                study_year = student.current_study_year
                 prog, _ = Program.objects.get_or_create(
                     name=data['course'],
-                    defaults={'code': prog_code, 'department': dept}
+                    defaults={
+                        'code': prog_code,
+                        'department': dept,
+                        'duration_years': max(4, study_year)
+                    }
                 )
+                if prog.duration_years < study_year:
+                    prog.duration_years = study_year
+                    prog.save(update_fields=['duration_years'])
                 student.program = prog
             student.save()
 
