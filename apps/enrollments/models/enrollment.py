@@ -14,10 +14,12 @@ class StudentEnrollment(BaseModel):
         on_delete=models.CASCADE,
         related_name="unit_enrollments",
     )
-    curriculum_unit = models.ForeignKey(
-        "curriculum.CurriculumUnit",
+    unit = models.ForeignKey(
+        "units.Unit",
         on_delete=models.PROTECT,
         related_name="student_enrollments",
+        null=True,
+        blank=True,
     )
     term = models.ForeignKey(
         "timetable.AcademicTerm",
@@ -28,4 +30,4 @@ class StudentEnrollment(BaseModel):
     score = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
 
     class Meta:
-        unique_together = ("student", "curriculum_unit", "term")
+        unique_together = ("student", "unit", "term")

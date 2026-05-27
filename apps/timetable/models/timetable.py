@@ -51,11 +51,21 @@ class TimetableSlot(BaseModel):
         on_delete=models.PROTECT,
         related_name="slots",
     )
-    curriculum_unit = models.ForeignKey(
-        "curriculum.CurriculumUnit",
+    unit = models.ForeignKey(
+        "units.Unit",
         on_delete=models.PROTECT,
         related_name="timetable_slots",
+        null=True,
+        blank=True,
     )
+    program = models.ForeignKey(
+        "programs.Program",
+        on_delete=models.PROTECT,
+        related_name="timetable_slots",
+        null=True,
+        blank=True,
+    )
+    year_of_study = models.PositiveSmallIntegerField(default=1)
     lecturer = models.ForeignKey(
         "lecturers.Lecturer",
         on_delete=models.PROTECT,
@@ -82,7 +92,7 @@ class TimetableSlot(BaseModel):
         ordering = ["term", "day_of_week", "start_time"]
 
     def __str__(self) -> str:
-        return f"{self.curriculum_unit} {self.day_of_week} {self.start_time}"
+        return f"{self.unit.code} {self.day_of_week} {self.start_time}"
 
 
 class TimetableConflict(BaseModel):

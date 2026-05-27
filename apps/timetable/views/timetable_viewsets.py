@@ -58,9 +58,8 @@ class TimetableSlotViewSet(ModelViewSet):
         """Get optimized queryset with proper select_related."""
         return TimetableSlot.objects.select_related(
             "term",
-            "curriculum_unit",
-            "curriculum_unit__curriculum",
-            "curriculum_unit__unit",
+            "unit",
+            "program",
             "lecturer",
             "lecturer__user",
             "room",
@@ -94,11 +93,11 @@ class TimetableConflictViewSet(ReadOnlyModelViewSet):
         return TimetableConflict.objects.select_related(
             "term",
             "slot_a",
-            "slot_a__curriculum_unit",
+            "slot_a__unit",
             "slot_a__room",
             "slot_a__lecturer",
             "slot_b",
-            "slot_b__curriculum_unit",
+            "slot_b__unit",
             "slot_b__room",
             "slot_b__lecturer"
         ).all()

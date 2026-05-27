@@ -118,14 +118,9 @@ class TimetableConflictDetectionService:
             conflicts.append(TimetableConflict.Type.LECTURER)
         
         # Program conflict: same program
-        try:
-            slot_a_program = slot_a.curriculum_unit.curriculum.program_id
-            slot_b_program = slot_b.curriculum_unit.curriculum.program_id
-            if slot_a_program == slot_b_program:
+        if slot_a.program_id and slot_b.program_id:
+            if slot_a.program_id == slot_b.program_id:
                 conflicts.append(TimetableConflict.Type.PROGRAM)
-        except AttributeError:
-            # Skip program check if relationships don't exist
-            pass
         
         return conflicts if conflicts else [TimetableConflict.Type.ROOM]  # Default to ROOM
     
@@ -150,14 +145,14 @@ class TimetableConflictDetectionService:
             "conflict_type": conflict_type,
             "slot_a": {
                 "id": str(slot_a.id),
-                "unit": str(slot_a.curriculum_unit.unit.code),
+                "unit": str(slot_a.unit.code),
                 "lecturer": slot_a.lecturer.user.university_id,
                 "room": slot_a.room.code,
                 "time": f"{slot_a.start_time} - {slot_a.end_time}",
             },
             "slot_b": {
                 "id": str(slot_b.id),
-                "unit": str(slot_b.curriculum_unit.unit.code),
+                "unit": str(slot_b.unit.code),
                 "lecturer": slot_b.lecturer.user.university_id,
                 "room": slot_b.room.code,
                 "time": f"{slot_b.start_time} - {slot_b.end_time}",

@@ -31,7 +31,7 @@ def serialize_unit(unit) -> dict:
 	return {
 		"id": str(unit.id),
 		"code": unit.code,
-		"title": unit.title,
+		"title": unit.name,
 		"credit_hours": unit.credit_hours,
 		"department_id": str(unit.department_id) if unit.department_id else None,
 	}

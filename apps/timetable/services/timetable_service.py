@@ -287,7 +287,7 @@ class TimetableFilterService:
             status=StudentEnrollment.Status.ENROLLED
         )
         if enrollments.exists():
-            unit_ids = enrollments.values_list("curriculum_unit__unit_id", flat=True)
+            unit_ids = enrollments.values_list("unit_id", flat=True)
             return TimetableSession.objects.filter(
                 unit_id__in=unit_ids,
                 academic_year=academic_year,

@@ -15,7 +15,7 @@ from apps.personalization.services.personalization_cache_service import Personal
 
 
 class StudentEnrollmentViewSet(ModelViewSet):
-    queryset = StudentEnrollment.objects.select_related("student", "curriculum_unit", "term").all()
+    queryset = StudentEnrollment.objects.select_related("student", "unit", "term").all()
     serializer_class = StudentEnrollmentSerializer
     filterset_fields = ["term", "status", "student"]
 
@@ -77,43 +77,60 @@ class StudentEnrollmentViewSet(ModelViewSet):
             if clean_code:
                 normalized_inputs.append((raw_code, clean_code))
                 
-        # 3. Match normalized codes to existing CurriculumUnit objects
-        matched_curriculum_units = []
+        # 3. Match normalized codes to existing Unit objects
+        from apps.units.models import Unit
+        matched_units = []
         for raw, clean in normalized_inputs:
-            candidates = CurriculumUnit.objects.select_related("unit", "curriculum").filter(
-                models.Q(unit__code__iexact=raw) |
-                models.Q(unit__code__iexact=clean) |
-                models.Q(unit__code__icontains=clean)
+            candidates = Unit.objects.filter(
+                models.Q(code__iexact=raw) |
+                models.Q(code__iexact=clean) |
+                models.Q(code__icontains=clean)
             )
             
-            matched_cu = None
+            matched_u = None
             for cand in candidates:
-                cand_clean = re.sub(r'[^A-Z0-9]', '', cand.unit.code.upper())
+                cand_clean = re.sub(r'[^A-Z0-9]', '', cand.code.upper())
                 if cand_clean == clean:
-                    matched_cu = cand
+                    matched_u = cand
                     break
             
-            if matched_cu:
-                if matched_cu not in matched_curriculum_units:
-                    matched_curriculum_units.append(matched_cu)
+            if not matched_u:
+                # If no matching Unit exists, create one! This implements the auto-extract/fallback logic
+                from apps.departments.models import Department
+                department = Department.objects.filter(code="COMP").first()
+                if not department:
+                    department, _ = Department.objects.get_or_create(
+                        code="COMP",
+                        defaults={"name": "School of Computing"}
+                    )
+                matched_u = Unit.objects.create(
+                    code=clean[:20],
+                    name=raw[:100],
+                    credit_hours=3.0,
+                    department=department,
+                    description=f"Synced Unit {raw}"
+                )
+            
+            if matched_u and matched_u not in matched_units:
+                matched_units.append(matched_u)
 
         # 4. Update student enrollments for this term
-        enrolled_cu_ids = [cu.id for cu in matched_curriculum_units]
+        enrolled_unit_ids = [u.id for u in matched_units]
         
         # Mark non-matching enrollments for this student and term as Dropped
         StudentEnrollment.objects.filter(
             student=student,
             term=term
         ).exclude(
-            curriculum_unit_id__in=enrolled_cu_ids
+            unit_id__in=enrolled_unit_ids
         ).update(status=StudentEnrollment.Status.DROPPED)
         
         # Create or update matching enrollments to ENROLLED
         synced_count = 0
-        for cu in matched_curriculum_units:
+        for u in matched_units:
             enrollment, created = StudentEnrollment.objects.update_or_create(
                 student=student,
-                curriculum_unit=cu,
+                unit=u,
                 term=term,
                 defaults={"status": StudentEnrollment.Status.ENROLLED}
             )
@@ -124,6 +141,6 @@ class StudentEnrollmentViewSet(ModelViewSet):
 
         return Response({
             "message": f"Successfully synchronized {synced_count} units.",
-            "synced_units": [cu.unit.code for cu in matched_curriculum_units],
+            "synced_units": [u.code for u in matched_units],
             "term": str(term)
         }, status=status.HTTP_200_OK)

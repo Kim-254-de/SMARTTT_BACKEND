@@ -121,7 +121,7 @@ class StudentEnrollmentSyncTests(APITestCase):
         self.assertEqual(enrollments.count(), 2)
         
         # Verify specific units are enrolled
-        enrolled_codes = [e.curriculum_unit.unit.code for e in enrollments]
+        enrolled_codes = [e.unit.code for e in enrollments]
         self.assertIn("COSC 435", enrolled_codes)
         self.assertIn("COSC 451", enrolled_codes)
 
@@ -129,7 +129,7 @@ class StudentEnrollmentSyncTests(APITestCase):
         # Manually create an enrollment that should be dropped
         StudentEnrollment.objects.create(
             student=self.student,
-            curriculum_unit=self.cu3,
+            unit=self.unit3,
             term=self.term,
             status=StudentEnrollment.Status.ENROLLED
         )
@@ -148,6 +148,6 @@ class StudentEnrollmentSyncTests(APITestCase):
         self.assertEqual(active_enrollments.count(), 2)
         
         dropped_enrollment = StudentEnrollment.objects.get(
-            student=self.student, curriculum_unit=self.cu3
+            student=self.student, unit=self.unit3
         )
         self.assertEqual(dropped_enrollment.status, StudentEnrollment.Status.DROPPED)

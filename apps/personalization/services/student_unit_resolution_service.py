@@ -40,7 +40,7 @@ class StudentUnitResolutionService:
 
 		if enrollment_queryset.exists():
 			unit_ids = list(
-				enrollment_queryset.values_list("curriculum_unit__unit_id", flat=True)
+				enrollment_queryset.values_list("unit_id", flat=True)
 			)
 			return ResolvedStudentUnits(
 				source="enrollment",
@@ -52,17 +52,12 @@ class StudentUnitResolutionService:
 				unit_ids=[str(unit_id) for unit_id in unit_ids],
 			)
 
-		curriculum = PersonalizationSelector.get_current_curriculum(student)
-		PersonalizationValidator.validate_curriculum(curriculum)
-		curriculum_units = PersonalizationSelector.get_curriculum_units(curriculum)
-		unit_ids = [str(curriculum_unit.unit_id) for curriculum_unit in curriculum_units]
-
 		return ResolvedStudentUnits(
-			source="curriculum",
+			source="enrollment",
 			academic_year=academic_year,
 			semester=semester,
-			curriculum=curriculum,
+			curriculum=None,
 			enrollment_queryset=enrollment_queryset,
-			unit_queryset=curriculum_units,
-			unit_ids=unit_ids,
+			unit_queryset=enrollment_queryset,
+			unit_ids=[],
 		)

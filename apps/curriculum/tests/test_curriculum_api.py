@@ -6,7 +6,7 @@ from rest_framework.test import APITestCase
 
 from apps.accounts.models import User
 from apps.curriculum.models import Curriculum, CurriculumUnit
-from apps.departments.models import Department
+from apps.departments.models import Department, Faculty
 from apps.lecturers.models import Lecturer
 from apps.programs.models import Program
 from apps.students.models import Student
@@ -16,8 +16,9 @@ from apps.units.models import Unit
 
 class CurriculumAPITestCase(APITestCase):
     def setUp(self):
-        self.department = Department.objects.create(name="Computer Science", code="CS")
-        self.other_department = Department.objects.create(name="Business", code="BUS")
+        self.faculty = Faculty.objects.create(name="Science", code="SCI")
+        self.department = Department.objects.create(faculty=self.faculty, name="Computer Science", code="CS")
+        self.other_department = Department.objects.create(faculty=self.faculty, name="Business", code="BUS")
 
         self.program = Program.objects.create(
             name="BSc Computer Science",
@@ -27,13 +28,13 @@ class CurriculumAPITestCase(APITestCase):
         )
 
         self.unit_1 = Unit.objects.create(
-            title="Data Structures",
+            name="Data Structures",
             code="CSC201",
             credit_hours=3,
             department=self.department,
         )
         self.unit_2 = Unit.objects.create(
-            title="Algorithms",
+            name="Algorithms",
             code="CSC202",
             credit_hours=3,
             department=self.department,
@@ -49,6 +50,7 @@ class CurriculumAPITestCase(APITestCase):
 
         self.student_user = User.objects.create_user(
             username="student1",
+            email="student1@uni.edu",
             password="secret123",
             role=User.Role.STUDENT,
             university_id="STD001",

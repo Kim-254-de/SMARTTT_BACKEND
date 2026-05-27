@@ -417,7 +417,7 @@ class TimetableSlotAdmin(admin.ModelAdmin):
         "created_at"
     )
     search_fields = (
-        "curriculum_unit__unit__code",
+        "unit__code",
         "lecturer__user__first_name",
         "lecturer__user__last_name",
         "room__code"
@@ -430,7 +430,8 @@ class TimetableSlotAdmin(admin.ModelAdmin):
         ("Session Details", {
             "fields": (
                 "term",
-                "curriculum_unit",
+                "unit",
+                "program",
                 "year_of_study",
                 "class_group"
             )
@@ -463,10 +464,10 @@ class TimetableSlotAdmin(admin.ModelAdmin):
     )
     
     def get_unit_code(self, obj):
-        """Display unit code from related curriculum unit."""
-        return obj.curriculum_unit.unit.code
+        """Display unit code from related unit."""
+        return obj.unit.code
     get_unit_code.short_description = "Unit"
-    get_unit_code.admin_order_field = "curriculum_unit__unit__code"
+    get_unit_code.admin_order_field = "unit__code"
     
     def get_lecturer_name(self, obj):
         """Display lecturer's full name."""
@@ -528,8 +529,8 @@ class TimetableConflictAdmin(admin.ModelAdmin):
     )
     list_filter = ("conflict_type", "term", "created_at")
     search_fields = (
-        "slot_a__curriculum_unit__unit__code",
-        "slot_b__curriculum_unit__unit__code",
+        "slot_a__unit__code",
+        "slot_b__unit__code",
         "slot_a__room__code",
         "slot_b__room__code"
     )
@@ -582,12 +583,12 @@ class TimetableConflictAdmin(admin.ModelAdmin):
     
     def slot_a_info(self, obj):
         """Display info about first conflicting slot."""
-        return f"{obj.slot_a.curriculum_unit.unit.code} {obj.slot_a.get_day_of_week_display()}"
+        return f"{obj.slot_a.unit.code} {obj.slot_a.get_day_of_week_display()}"
     slot_a_info.short_description = "Slot A"
     
     def slot_b_info(self, obj):
         """Display info about second conflicting slot."""
-        return f"{obj.slot_b.curriculum_unit.unit.code} {obj.slot_b.get_day_of_week_display()}"
+        return f"{obj.slot_b.unit.code} {obj.slot_b.get_day_of_week_display()}"
     slot_b_info.short_description = "Slot B"
     
     def formatted_details(self, obj):
