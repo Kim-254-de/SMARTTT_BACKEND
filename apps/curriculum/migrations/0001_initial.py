@@ -12,45 +12,9 @@ class Migration(migrations.Migration):
         ("programs", "__first__"),
         ("units", "__first__"),
     ]
-    ]
 
     operations = [
         migrations.CreateModel(
-<<<<<<< HEAD
-            name='Curriculum',
-            fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('version_name', models.CharField(max_length=50)),
-                ('effective_academic_year', models.CharField(max_length=20)),
-                ('is_active', models.BooleanField(default=True)),
-                ('program', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='curricula', to='programs.program')),
-            ],
-            options={
-                'ordering': ['program__code', 'version_name'],
-                'unique_together': {('program', 'version_name')},
-            },
-        ),
-        migrations.CreateModel(
-            name='CurriculumUnit',
-            fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
-                ('year_of_study', models.PositiveSmallIntegerField()),
-                ('semester', models.PositiveSmallIntegerField(choices=[(1, 'Semester 1'), (2, 'Semester 2'), (3, 'Semester 3')])),
-                ('is_core', models.BooleanField(default=True)),
-                ('curriculum', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='curriculum_units', to='curriculum.curriculum')),
-                ('unit', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='curriculum_mappings', to='units.unit')),
-            ],
-            options={
-                'ordering': ['curriculum', 'year_of_study', 'semester', 'unit__code'],
-                'unique_together': {('curriculum', 'unit')},
-            },
-        ),
-    ]
-=======
             name="Curriculum",
             fields=[
                 ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
@@ -230,4 +194,3 @@ class Migration(migrations.Migration):
             index=models.Index(fields=["unit"], name="idx_curriculumunit_unit"),
         ),
     ]
->>>>>>> d3dfc08ecdd927d0f23ef4d691ac87f8b34975d6
