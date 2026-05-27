@@ -169,7 +169,7 @@ class TimetableSessionViewSet(viewsets.ModelViewSet):
         """Create with current user as creator."""
         serializer.save(created_by=self.request.user)
 
-    @action(detail=False, methods=["get"], permission_classes=[CanViewTimetable])
+    @action(detail=False, methods=["get"], url_path="my-timetable", permission_classes=[CanViewTimetable])
     def my_timetable(self, request):
         """
         Get personalized timetable for logged-in student.
@@ -208,7 +208,7 @@ class TimetableSessionViewSet(viewsets.ModelViewSet):
         serializer = StudentTimetableSessionSerializer(sessions, many=True)
         return Response(serializer.data)
 
-    @action(detail=False, methods=["get"], permission_classes=[CanViewTimetable])
+    @action(detail=False, methods=["get"], url_path="lecturer-schedule", permission_classes=[CanViewTimetable])
     def lecturer_schedule(self, request):
         """Get teaching schedule for logged-in lecturer."""
         from apps.lecturers.models import Lecturer

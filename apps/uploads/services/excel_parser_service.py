@@ -25,36 +25,128 @@ class ExcelParserService:
         Detects if a DataFrame is a 2D Grid Timetable (cohorts as rows, day/time as columns)
         and converts it into a standardized flat tabular format.
         """
-        # 1. Locate the day and time header rows by scanning the first 15 rows
-        day_row_idx = None
-        time_row_idx = None
-        days_of_week = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+        day_map = {
+            "mon": "MON", "monday": "MON",
+            "tue": "TUE", "tues": "TUE", "tuesday": "TUE",
+            "wed": "WED", "wednesday": "WED",
+            "thu": "THU", "thursday": "THU",
+            "fri": "FRI", "friday": "FRI",
+            "sat": "SAT", "saturday": "SAT",
+            "sun": "SUN", "sunday": "SUN",
+        }
+
+        # 1. First, check if there is a combined day + time header row (e.g. "Mon\n7-8" or "Mon 7-8")
+        combined_row_idx = None
+        combined_pattern = re.compile(
+            r'\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\b[\s\S]*?\b(\d+)\s*[-:]\s*(\d+)\b',
+            re.IGNORECASE
+        )
         
         for idx in range(min(15, len(df))):
-            row_values = [str(x).lower().strip() for x in df.iloc[idx].values]
-            has_day = any(day in row_values for day in days_of_week)
-            has_time = any(re.match(r'^\d+[-:]\d+$', str(x).strip()) for x in df.iloc[idx].values if pd.notna(x))
-            
-            if has_day and not has_time:
-                day_row_idx = idx
-            elif has_time:
-                time_row_idx = idx
-                if day_row_idx is None:
-                    # Look in the rows above the time row for the day headers
-                    for prev_idx in range(idx):
-                        prev_row_values = [str(x).lower().strip() for x in df.iloc[prev_idx].values]
-                        if any(day in prev_row_values for day in days_of_week):
-                            day_row_idx = prev_idx
-                            break
+            row_values = [str(x) for x in df.iloc[idx].values]
+            match_count = sum(1 for x in row_values if combined_pattern.search(x))
+            if match_count >= 3:
+                combined_row_idx = idx
                 break
+
+        day_row_idx = None
+        time_row_idx = None
+        col_mappings = {}
+        
+        if combined_row_idx is not None:
+            # Case A: Combined day + time in a single row
+            time_row_idx = combined_row_idx
+            current_day = "MON"
+            for col_idx in range(1, len(df.columns)):
+                cell_val = df.iloc[combined_row_idx, col_idx]
+                if pd.notna(cell_val) and str(cell_val).strip():
+                    cell_str = str(cell_val).strip()
+                    match = combined_pattern.search(cell_str)
+                    if match:
+                        day_str = match.group(1).lower()
+                        current_day = day_map.get(day_str, "MON")
+                        start_hour = int(match.group(2))
+                        end_hour = int(match.group(3))
+                        start_time = f"{start_hour:02d}:00"
+                        end_time = f"{end_hour:02d}:00"
+                        
+                        col_mappings[col_idx] = {
+                            "day": current_day,
+                            "start_time": start_time,
+                            "end_time": end_time,
+                        }
+                    else:
+                        # Fallback to pure time slot mapping if the day is not explicitly in this cell
+                        time_match = re.search(r'\b(\d+)\s*[-:]\s*(\d+)\b', cell_str)
+                        if time_match:
+                            start_hour = int(time_match.group(1))
+                            end_hour = int(time_match.group(2))
+                            start_time = f"{start_hour:02d}:00"
+                            end_time = f"{end_hour:02d}:00"
+                            col_mappings[col_idx] = {
+                                "day": current_day,
+                                "start_time": start_time,
+                                "end_time": end_time,
+                            }
+        else:
+            # Case B: Separate day and time rows
+            days_of_week = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+            
+            for idx in range(min(15, len(df))):
+                row_values = [str(x).lower().strip() for x in df.iloc[idx].values]
+                has_day = any(day in row_values for day in days_of_week)
+                has_time = any(re.match(r'^\d+[-:]\d+$', str(x).strip()) for x in df.iloc[idx].values if pd.notna(x))
                 
-        # If we didn't find a time slot row, it is likely not a grid timetable, return as-is
-        if time_row_idx is None:
-            return df
-            
-        if day_row_idx is None and time_row_idx > 0:
-            day_row_idx = time_row_idx - 1
-            
+                if has_day and not has_time:
+                    day_row_idx = idx
+                elif has_time:
+                    time_row_idx = idx
+                    if day_row_idx is None:
+                        for prev_idx in range(idx):
+                            prev_row_values = [str(x).lower().strip() for x in df.iloc[prev_idx].values]
+                            if any(day in prev_row_values for day in days_of_week):
+                                day_row_idx = prev_idx
+                                break
+                    break
+                    
+            if time_row_idx is None:
+                return df
+                
+            if day_row_idx is None and time_row_idx > 0:
+                day_row_idx = time_row_idx - 1
+                
+            current_day = "MON"
+            for col_idx in range(1, len(df.columns)):
+                # Resolve Day
+                if day_row_idx is not None:
+                    day_val = df.iloc[day_row_idx, col_idx]
+                    if pd.notna(day_val) and str(day_val).strip():
+                        normalized_day = str(day_val).strip().lower()
+                        for key, val in day_map.items():
+                            if normalized_day == key or normalized_day.startswith(key):
+                                current_day = val
+                                break
+                                
+                # Resolve Time Slot
+                time_val = df.iloc[time_row_idx, col_idx]
+                if pd.notna(time_val) and str(time_val).strip():
+                    slot_str = str(time_val).strip()
+                    match = re.match(r'^(\d+)(?::(\d+))?\s*[-:]\s*(\d+)(?::(\d+))?$', slot_str)
+                    if match:
+                        start_hour = int(match.group(1))
+                        start_min = int(match.group(2)) if match.group(2) else 0
+                        end_hour = int(match.group(3))
+                        end_min = int(match.group(4)) if match.group(4) else 0
+                        
+                        start_time = f"{start_hour:02d}:{start_min:02d}"
+                        end_time = f"{end_hour:02d}:{end_min:02d}"
+                        
+                        col_mappings[col_idx] = {
+                            "day": current_day,
+                            "start_time": start_time,
+                            "end_time": end_time,
+                        }
+                        
         # 2. Extract academic year and semester from the top rows if possible
         academic_year = "2025/2026"
         semester = 1
@@ -72,49 +164,49 @@ class ExcelParserService:
                 semester = 2
                 
         # 3. Build column mappings: col_idx -> (day, start_time, end_time)
-        day_map = {
-            "mon": "MON", "monday": "MON",
-            "tue": "TUE", "tues": "TUE", "tuesday": "TUE",
-            "wed": "WED", "wednesday": "WED",
-            "thu": "THU", "thursday": "THU",
-            "fri": "FRI", "friday": "FRI",
-            "sat": "SAT", "saturday": "SAT",
-            "sun": "SUN", "sunday": "SUN",
-        }
-        
-        col_mappings = {}
-        current_day = "MON"
-        
-        for col_idx in range(1, len(df.columns)):
-            # Resolve Day (handles merged cells in headers by scanning left)
-            if day_row_idx is not None:
-                day_val = df.iloc[day_row_idx, col_idx]
-                if pd.notna(day_val) and str(day_val).strip():
-                    normalized_day = str(day_val).strip().lower()
-                    for key, val in day_map.items():
-                        if normalized_day == key or normalized_day.startswith(key):
-                            current_day = val
-                            break
-                            
-            # Resolve Time Slot
-            time_val = df.iloc[time_row_idx, col_idx]
-            if pd.notna(time_val) and str(time_val).strip():
-                slot_str = str(time_val).strip()
-                match = re.match(r'^(\d+)(?::(\d+))?\s*[-:]\s*(\d+)(?::(\d+))?$', slot_str)
-                if match:
-                    start_hour = int(match.group(1))
-                    start_min = int(match.group(2)) if match.group(2) else 0
-                    end_hour = int(match.group(3))
-                    end_min = int(match.group(4)) if match.group(4) else 0
-                    
-                    start_time = f"{start_hour:02d}:{start_min:02d}"
-                    end_time = f"{end_hour:02d}:{end_min:02d}"
-                    
-                    col_mappings[col_idx] = {
-                        "day": current_day,
-                        "start_time": start_time,
-                        "end_time": end_time,
-                    }
+        if not col_mappings:
+            day_map = {
+                "mon": "MON", "monday": "MON",
+                "tue": "TUE", "tues": "TUE", "tuesday": "TUE",
+                "wed": "WED", "wednesday": "WED",
+                "thu": "THU", "thursday": "THU",
+                "fri": "FRI", "friday": "FRI",
+                "sat": "SAT", "saturday": "SAT",
+                "sun": "SUN", "sunday": "SUN",
+            }
+            
+            current_day = "MON"
+            
+            for col_idx in range(1, len(df.columns)):
+                # Resolve Day (handles merged cells in headers by scanning left)
+                if day_row_idx is not None:
+                    day_val = df.iloc[day_row_idx, col_idx]
+                    if pd.notna(day_val) and str(day_val).strip():
+                        normalized_day = str(day_val).strip().lower()
+                        for key, val in day_map.items():
+                            if normalized_day == key or normalized_day.startswith(key):
+                                current_day = val
+                                break
+                                
+                # Resolve Time Slot
+                time_val = df.iloc[time_row_idx, col_idx]
+                if pd.notna(time_val) and str(time_val).strip():
+                    slot_str = str(time_val).strip()
+                    match = re.match(r'^(\d+)(?::(\d+))?\s*[-:]\s*(\d+)(?::(\d+))?$', slot_str)
+                    if match:
+                        start_hour = int(match.group(1))
+                        start_min = int(match.group(2)) if match.group(2) else 0
+                        end_hour = int(match.group(3))
+                        end_min = int(match.group(4)) if match.group(4) else 0
+                        
+                        start_time = f"{start_hour:02d}:{start_min:02d}"
+                        end_time = f"{end_hour:02d}:{end_min:02d}"
+                        
+                        col_mappings[col_idx] = {
+                            "day": current_day,
+                            "start_time": start_time,
+                            "end_time": end_time,
+                        }
                     
         # 4. Process program rows (everything below the time header row)
         flat_rows = []

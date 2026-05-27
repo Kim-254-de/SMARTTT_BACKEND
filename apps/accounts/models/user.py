@@ -12,7 +12,7 @@ class User(AbstractUser, BaseModel):
         ADMIN = "admin", "Admin"
 
     role = models.CharField(max_length=20, choices=Role.choices)
-    university_id = models.CharField(max_length=30, unique=True)
+    university_id = models.CharField(max_length=30, unique=True, blank=True, null=True)
     phone_number = models.CharField(max_length=30, blank=True)
 
     def __str__(self) -> str:
