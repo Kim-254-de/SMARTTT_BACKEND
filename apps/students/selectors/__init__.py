@@ -9,9 +9,13 @@ ensure consistent query optimization.
 """
 
 from typing import List, Optional
+<<<<<<< HEAD
 
 from django.db.models import Q, Prefetch
 from django.db.models.query import QuerySet
+=======
+from django.db.models import Q, Prefetch, QuerySet
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
 
 from apps.students.models import Student, AcademicProgress, StudentEnrollment
 

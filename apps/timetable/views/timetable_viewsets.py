@@ -21,7 +21,7 @@ from apps.timetable.serializers import (
     TimetableUploadBatchSerializer,
     TimetableUploadBatchDetailedSerializer,
 )
-from apps.timetable.permissions import CanManageTimetable, CanViewOwnTimetable
+from apps.timetable.permissions import CanManageTimetable
 from apps.timetable.services.upload_pipeline import TimetableUploadPipelineService
 from apps.timetable.validators import ExcelFileValidator
 from apps.timetable.utils import (
@@ -58,9 +58,8 @@ class TimetableSlotViewSet(ModelViewSet):
         """Get optimized queryset with proper select_related."""
         return TimetableSlot.objects.select_related(
             "term",
-            "curriculum_unit",
-            "curriculum_unit__curriculum",
-            "curriculum_unit__unit",
+            "unit",
+            "program",
             "lecturer",
             "lecturer__user",
             "room",
@@ -94,11 +93,11 @@ class TimetableConflictViewSet(ReadOnlyModelViewSet):
         return TimetableConflict.objects.select_related(
             "term",
             "slot_a",
-            "slot_a__curriculum_unit",
+            "slot_a__unit",
             "slot_a__room",
             "slot_a__lecturer",
             "slot_b",
-            "slot_b__curriculum_unit",
+            "slot_b__unit",
             "slot_b__room",
             "slot_b__lecturer"
         ).all()

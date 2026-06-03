@@ -12,6 +12,7 @@ from .timetable_service import (
 )
 
 __all__ = [
+<<<<<<< HEAD
 	"TimetableExcelParserService",
 	"TimetableTransformService",
 	"TimetablePersistenceService",
@@ -22,4 +23,16 @@ __all__ = [
 	"RoomAllocationService",
 	"LecturerScheduleService",
 	"TimetableConflictService",
+=======
+    "TimetableExcelParserService",
+    "TimetableTransformService",
+    "TimetablePersistenceService",
+    "TimetableConflictDetectionService",
+    "TimetableUploadPipelineService",
+    "TimetableSessionService",
+    "TimetableFilterService",
+    "RoomAllocationService",
+    "LecturerScheduleService",
+    "TimetableConflictService",
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
 ]

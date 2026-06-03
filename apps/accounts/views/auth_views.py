@@ -5,11 +5,20 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.db import transaction
+from datetime import datetime
+import re
 
 from apps.accounts.models import User
+<<<<<<< HEAD
 from apps.departments.models import Department, Faculty
 from apps.programs.models import Program
 from apps.students.models import Student
+=======
+from apps.departments.models import Department
+from apps.departments.models.models import Faculty
+from apps.programs.models.program import Program
+from apps.students.models.student import Student
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -26,11 +35,15 @@ def serialize_user(user):
         "full_name": user.get_full_name(),
         "admission_number": user.university_id,
         "course": student.program.name if student and student.program else None,
+<<<<<<< HEAD
         "department": (
             student.department.name
             if student and getattr(student, "department", None)
             else (student.program.department.name if student and student.program and student.program.department else None)
         ),
+=======
+        "department": student.program.department.name if student and student.program and student.program.department else None,
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
         "year_of_study": student.current_study_year if student else None,
     }
 
@@ -46,11 +59,14 @@ class RegisterView(APIView):
         admission_number = data.get('admission_number')
         course_name = data.get('course')
         department_name = data.get('department')
-        year_of_study = data.get('year_of_study', 1)
+        try:
+            year_of_study = int(data.get('year_of_study', 1))
+        except (ValueError, TypeError):
+            year_of_study = 1
 
         if User.objects.filter(email=email).exists() or User.objects.filter(username=email).exists():
             return Response({"detail": "User with this email already exists."}, status=status.HTTP_400_BAD_REQUEST)
-        if User.objects.filter(university_id=admission_number).exists():
+        if admission_number and User.objects.filter(university_id=admission_number).exists():
             return Response({"detail": "User with this admission number already exists."}, status=status.HTTP_400_BAD_REQUEST)
 
         name_parts = full_name.split(' ', 1)
@@ -63,25 +79,36 @@ class RegisterView(APIView):
             password=password,
             first_name=first_name,
             last_name=last_name,
-            university_id=admission_number,
+            university_id=admission_number if admission_number else None,
             role=User.Role.STUDENT
         )
 
         if department_name and course_name:
-            import re
             dept_code = re.sub(r'[^A-Z]', '', department_name.upper())[:20]
             if not dept_code: dept_code = department_name.upper()[:20]
 
+<<<<<<< HEAD
             # Departments require a Faculty; create a safe default.
             faculty, _ = Faculty.objects.get_or_create(
                 code="GEN",
                 defaults={"name": "General", "description": "Default faculty"},
+=======
+            # Get or create a default faculty (required by Department FK)
+            fac_code = dept_code[:10] if dept_code else 'DEFAULT'
+            faculty, _ = Faculty.objects.get_or_create(
+                name=department_name,
+                defaults={'code': fac_code}
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
             )
             
             department, _ = Department.objects.get_or_create(
                 faculty=faculty,
                 name=department_name,
+<<<<<<< HEAD
                 defaults={"code": dept_code},
+=======
+                defaults={'code': dept_code, 'faculty': faculty}
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
             )
             
             prog_code = re.sub(r'[^A-Z]', '', course_name.upper())[:30]
@@ -92,12 +119,42 @@ class RegisterView(APIView):
                 name=course_name,
                 defaults={
                     'code': prog_code,
+<<<<<<< HEAD
+=======
+                    'department': department,
+                    'duration_years': max(4, year_of_study)
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
                 }
             )
+            if program.duration_years < year_of_study:
+                program.duration_years = year_of_study
+                program.save(update_fields=['duration_years'])
 
-            from datetime import datetime
+            reg_num = re.sub(r'[^A-Z0-9\-]', '', admission_number.upper()) if admission_number else f"STU-{user.id}"
+            if not reg_num:
+                reg_num = f"STU-{user.id}"
+
+            admission_yr = datetime.now().year
+            if reg_num:
+                match = re.search(r'[/\-](\d{2,4})$', reg_num.strip())
+                if match:
+                    yr_str = match.group(1)
+                    if len(yr_str) == 2:
+                        admission_yr = 2000 + int(yr_str)
+                    elif len(yr_str) == 4:
+                        admission_yr = int(yr_str)
+                else:
+                    match = re.search(r'^(\d{2})[/\-]', reg_num.strip())
+                    if match:
+                        admission_yr = 2000 + int(match.group(1))
+
+            from apps.timetable.models import AcademicTerm
+            current_term = AcademicTerm.objects.filter(is_current=True).first()
+            current_sem = current_term.semester if current_term else 1
+
             Student.objects.create(
                 user=user,
+<<<<<<< HEAD
                 registration_number=admission_number,
                 first_name=first_name,
                 last_name=last_name,
@@ -107,6 +164,17 @@ class RegisterView(APIView):
                 admission_year=datetime.now().year,
                 current_study_year=year_of_study,
                 current_semester=1,
+=======
+                registration_number=reg_num,
+                first_name=first_name or "First",
+                last_name=last_name or "Last",
+                email=email,
+                department=department,
+                program=program,
+                admission_year=admission_yr,
+                current_study_year=year_of_study,
+                current_semester=current_sem
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
             )
 
         tokens = get_tokens_for_user(user)
@@ -159,9 +227,15 @@ class ProfileView(APIView):
         student = getattr(user, 'student_profile', None)
         if student:
             if 'year_of_study' in data:
+<<<<<<< HEAD
                 student.current_study_year = data['year_of_study']
+=======
+                try:
+                    student.current_study_year = int(data['year_of_study'])
+                except (ValueError, TypeError):
+                    pass
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
             if 'course' in data and 'department' in data:
-                import re
                 dept_code = re.sub(r'[^A-Z]', '', data['department'].upper())[:20]
                 if not dept_code: dept_code = data['department'].upper()[:20]
 
@@ -179,11 +253,23 @@ class ProfileView(APIView):
                 prog_code = re.sub(r'[^A-Z]', '', data['course'].upper())[:30]
                 if not prog_code: prog_code = data['course'].upper()[:30]
                 
+                study_year = student.current_study_year
                 prog, _ = Program.objects.get_or_create(
                     department=dept,
                     name=data['course'],
+<<<<<<< HEAD
                     defaults={'code': prog_code},
+=======
+                    defaults={
+                        'code': prog_code,
+                        'department': dept,
+                        'duration_years': max(4, study_year)
+                    }
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
                 )
+                if prog.duration_years < study_year:
+                    prog.duration_years = study_year
+                    prog.save(update_fields=['duration_years'])
                 student.program = prog
                 student.department = dept
             student.save()

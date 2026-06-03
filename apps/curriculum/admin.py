@@ -1,5 +1,10 @@
 from django.contrib import admin
+<<<<<<< HEAD
 from apps.curriculum.models import Curriculum, CurriculumUnit, CurriculumVersion
+=======
+
+from .models import Curriculum, CurriculumUnit, CurriculumVersion
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
 
 
 class CurriculumUnitInline(admin.TabularInline):

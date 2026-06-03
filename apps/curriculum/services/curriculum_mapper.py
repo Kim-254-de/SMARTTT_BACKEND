@@ -17,7 +17,7 @@ class CurriculumMapper:
     def units_for_curriculum(curriculum):
         if not curriculum:
             return CurriculumUnit.objects.none()
-        return curriculum.units.select_related("unit").all()
+        return curriculum.curriculum_units.select_related("unit").all()
 
     @staticmethod
     def determine_units_for_student(program, study_year, semester, academic_year=None):
@@ -58,7 +58,7 @@ class CurriculumMapperService:
 
         curriculum = cls.get_curriculum(
             program_id=student.program_id,
-            study_year=student.current_year,
+            study_year=student.current_study_year,
             semester=current_term.semester,
             academic_year=current_term.academic_year,
         )
@@ -84,7 +84,7 @@ class CurriculumMapperService:
                     "curriculum_unit_id": str(item.id),
                     "unit_id": str(item.unit_id),
                     "unit_code": item.unit.code,
-                    "unit_title": item.unit.title,
+                    "unit_title": item.unit.name,
                     "credit_hours": item.credit_hours,
                     "is_core": item.is_core,
                     "is_elective": item.is_elective,

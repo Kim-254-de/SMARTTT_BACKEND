@@ -21,7 +21,13 @@ class CurriculumService:
             version=payload.get("version", 1),
         )
 
-        curriculum = Curriculum.objects.create(created_by=actor, **payload)
+        create_payload = payload.copy()
+        if "program" in create_payload:
+            create_payload["program_id"] = create_payload.pop("program")
+        if "department" in create_payload:
+            create_payload["department_id"] = create_payload.pop("department")
+
+        curriculum = Curriculum.objects.create(created_by=actor, **create_payload)
 
         cls._replace_curriculum_units(curriculum=curriculum, units_payload=units_payload)
         CurriculumDomainValidator.validate_missing_required_units(curriculum=curriculum)

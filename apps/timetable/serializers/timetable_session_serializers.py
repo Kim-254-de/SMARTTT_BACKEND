@@ -12,7 +12,7 @@ class TimetableSessionListSerializer(serializers.ModelSerializer):
     """Lightweight serializer for listing timetable sessions."""
 
     unit_code = serializers.CharField(source="unit.code", read_only=True)
-    unit_title = serializers.CharField(source="unit.title", read_only=True)
+    unit_title = serializers.CharField(source="unit.name", read_only=True)
     room_code = serializers.CharField(source="room.code", read_only=True, allow_null=True)
     room_name = serializers.CharField(source="room.name", read_only=True, allow_null=True)
     lecturer_name = serializers.SerializerMethodField(read_only=True)
@@ -247,7 +247,7 @@ class StudentTimetableSessionSerializer(serializers.ModelSerializer):
     """
 
     unit_code = serializers.CharField(source="unit.code", read_only=True)
-    unit_title = serializers.CharField(source="unit.title", read_only=True)
+    unit_title = serializers.CharField(source="unit.name", read_only=True)
     unit_credit_hours = serializers.IntegerField(source="unit.credit_hours", read_only=True)
     room_code = serializers.CharField(source="room.code", read_only=True, allow_null=True)
     room_name = serializers.CharField(source="room.name", read_only=True, allow_null=True)

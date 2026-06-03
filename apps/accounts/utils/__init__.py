@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 """Accounts utility helpers.
 
 These helpers are intentionally small and dependency-light so they can be used
@@ -34,3 +35,20 @@ def is_student(user) -> bool:
 		return False
 	return user.role == "student"
 
+=======
+from apps.students.utils import (
+    is_super_admin,
+    is_department_admin,
+    is_registrar,
+    is_lecturer,
+    is_student,
+)
+
+__all__ = [
+    "is_super_admin",
+    "is_department_admin",
+    "is_registrar",
+    "is_lecturer",
+    "is_student",
+]
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b

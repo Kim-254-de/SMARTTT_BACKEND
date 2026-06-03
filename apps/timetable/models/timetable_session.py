@@ -92,7 +92,7 @@ class TimetableSession(BaseModel):
         help_text=_("Lecturer assigned to teach this session"),
     )
     room = models.ForeignKey(
-        "timetable.Room",
+        "rooms.Room",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

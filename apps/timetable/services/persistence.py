@@ -2,7 +2,9 @@ from typing import List, Dict, Any, Tuple
 from django.db import transaction
 from django.core.exceptions import ObjectDoesNotExist
 
-from apps.curriculum.models import CurriculumUnit
+from apps.units.models import Unit
+from apps.programs.models import Program
+from apps.departments.models import Department
 from apps.lecturers.models import Lecturer
 from apps.rooms.models import Room
 from apps.timetable.models import AcademicTerm, TimetableSlot
@@ -84,21 +86,35 @@ class TimetablePersistenceService:
                 f"Academic term not found: {row['academic_year']} S{row['semester']}"
             )
         
-        # Get CurriculumUnit
-        try:
-            curriculum_unit = CurriculumUnit.objects.select_related(
-                "curriculum",
-                "unit"
-            ).get(
-                curriculum__program__code=row["program_code"],
-                unit__code=row["unit_code"],
-                curriculum__study_year=row["year_of_study"],
-                curriculum__semester=row["semester"]
+        # Get or create Department (for program/unit assignment)
+        department = Department.objects.filter(code__iexact="COMP").first()
+        if not department:
+            department, _ = Department.objects.get_or_create(
+                code="COMP",
+                defaults={"name": "School of Computing"}
             )
-        except CurriculumUnit.DoesNotExist:
-            raise ResourceNotFoundException(
-                f"Curriculum unit not found: {row['program_code']}/{row['unit_code']} "
-                f"Year {row['year_of_study']} Sem {row['semester']}"
+            
+        # Get or create Program
+        program_code = row["program_code"]
+        program = Program.objects.filter(code__iexact=program_code).first()
+        if not program:
+            program = Program.objects.create(
+                code=program_code[:20],
+                name=f"Program {program_code}"[:100],
+                department=department,
+                duration_years=4
+            )
+            
+        # Get or create Unit
+        unit_code = row["unit_code"]
+        unit = Unit.objects.filter(code__iexact=unit_code).first()
+        if not unit:
+            unit_name = row.get("unit_name") or unit_code
+            unit = Unit.objects.create(
+                code=unit_code[:20],
+                name=unit_name[:100],
+                credit_hours=3.0,
+                department=department
             )
         
         # Get Room
@@ -122,7 +138,9 @@ class TimetablePersistenceService:
         # Check for duplicate
         existing = TimetableSlot.objects.filter(
             term=term,
-            curriculum_unit=curriculum_unit,
+            unit=unit,
+            program=program,
+            year_of_study=row["year_of_study"],
             lecturer=lecturer,
             room=room,
             day_of_week=row["day_of_week"],
@@ -133,14 +151,16 @@ class TimetablePersistenceService:
         
         if existing:
             raise DuplicateSessionException(
-                f"Duplicate session: {curriculum_unit.unit.code} "
+                f"Duplicate session: {unit.code} "
                 f"{row['day_of_week']} {row['start_time']}-{row['end_time']}"
             )
         
         # Create new slot
         slot = TimetableSlot.objects.create(
             term=term,
-            curriculum_unit=curriculum_unit,
+            unit=unit,
+            program=program,
+            year_of_study=row["year_of_study"],
             lecturer=lecturer,
             room=room,
             day_of_week=row["day_of_week"],

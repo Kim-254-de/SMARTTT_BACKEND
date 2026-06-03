@@ -279,9 +279,26 @@ class TimetableFilterService:
         Returns:
             Queryset of timetable sessions for student
         """
+        # Check for explicitly enrolled units first
+        from apps.enrollments.models import StudentEnrollment
+        enrollments = StudentEnrollment.objects.filter(
+            student=student,
+            term__academic_year=academic_year,
+            term__semester=semester,
+            status=StudentEnrollment.Status.ENROLLED
+        )
+        if enrollments.exists():
+            unit_ids = enrollments.values_list("unit_id", flat=True)
+            return TimetableSession.objects.filter(
+                unit_id__in=unit_ids,
+                academic_year=academic_year,
+                semester=semester
+            )
+
+        # Fallback to curriculum-based filtering
         # Get student's program and study year
         program = student.program
-        study_year = student.study_year
+        study_year = student.current_study_year
 
         # Get sessions for this program/year/semester
         sessions = TimetableSessionSelector.get_sessions_by_program(

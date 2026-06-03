@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 anaconda-anon-usage @ file:///opt/miniconda3/conda-bld/anaconda-anon-usage_1764636648062/work
 anaconda-auth @ file:///home/task_177249124085225/croot/anaconda-cloud-auth-split_1772491269211/work
 anaconda-cli-base @ file:///home/task_177038556646156/croot/anaconda-cli-base_1770385830159/work
@@ -118,3 +119,14 @@ websockets==16.0
 wheel==0.46.3
 xxhash==3.6.0
 zstandard @ file:///home/task_175818846949212/conda-bld/zstandard_1758189073015/work
+=======
+Django>=5.0,<6.0
+djangorestframework>=3.15,<4.0
+djangorestframework-simplejwt>=5.3,<6.0
+django-filter>=24.0,<25.0
+django-cors-headers>=4.3,<5.0
+psycopg[binary]>=3.1,<4.0
+pandas>=2.2,<3.0
+openpyxl>=3.1,<4.0
+python-dotenv>=1.0,<2.0
+>>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b

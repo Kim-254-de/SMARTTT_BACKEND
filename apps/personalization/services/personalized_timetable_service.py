@@ -54,11 +54,11 @@ class PersonalizedTimetableService:
 				"department_id": str(student.department_id),
 			},
 			"units": [
-				serialize_unit(enrollment.curriculum_unit.unit)
+				serialize_unit(enrollment.unit)
 				for enrollment in resolved.enrollment_queryset
 			]
 			if resolved.source == "enrollment"
-			else [serialize_unit(curriculum_unit.unit) for curriculum_unit in resolved.unit_queryset],
+			else [serialize_unit(enrollment.unit) for enrollment in resolved.unit_queryset],
 			"timetable": grouped_timetable,
 			"summary": {
 				"unit_count": len(resolved.unit_ids),
@@ -76,9 +76,9 @@ class PersonalizedTimetableService:
 	def generate_student_units_payload(student) -> dict:
 		resolved = StudentUnitResolutionService.resolve_student_units(student)
 		units = (
-			[serialize_unit(enrollment.curriculum_unit.unit) for enrollment in resolved.enrollment_queryset]
+			[serialize_unit(enrollment.unit) for enrollment in resolved.enrollment_queryset]
 			if resolved.source == "enrollment"
-			else [serialize_unit(curriculum_unit.unit) for curriculum_unit in resolved.unit_queryset]
+			else [serialize_unit(enrollment.unit) for enrollment in resolved.unit_queryset]
 		)
 
 		return {

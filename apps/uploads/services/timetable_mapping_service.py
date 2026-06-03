@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from django.db.models import Q
 
 from apps.departments.models import Department
@@ -16,34 +17,99 @@ class TimetableMappingService:
     def resolve_department(row: dict) -> Department | None:
         value = clean_text(row.get("department"))
         if not value:
-            return None
-        return Department.objects.filter(Q(code__iexact=value) | Q(name__iexact=value)).first()
+            value = "School of Computing"
+        code = re.sub(r'[^A-Z0-9]', '', value.upper())
+        if not code:
+            code = "DEPT"
+        dept = Department.objects.filter(
+            Q(code__iexact=value) | Q(name__iexact=value) | Q(code__iexact=code)
+        ).first()
+        if not dept:
+            dept = Department.objects.create(code=code[:20], name=value[:100])
+        return dept
 
     @staticmethod
     def resolve_program(row: dict, department: Department | None) -> Program | None:
         value = clean_text(row.get("program"))
         if not value:
             return None
-        queryset = Program.objects.filter(Q(code__iexact=value) | Q(name__iexact=value))
-        if department:
-            queryset = queryset.filter(department=department)
-        return queryset.first()
+        if not department:
+            department = Department.objects.get_or_create(code="SCHOOLOFCOMPUTING", defaults={"name": "School of Computing"})[0]
+            
+        code = re.sub(r'[^A-Z0-9]', '', value.upper())
+        if not code:
+            code = "PROG"
+            
+        prog = Program.objects.filter(
+            Q(code__iexact=value) | Q(name__iexact=value) | Q(code__iexact=code),
+            department=department
+        ).first()
+        
+        if not prog:
+            prog = Program.objects.create(
+                code=code[:20],
+                name=value[:100],
+                department=department,
+                description=f"Bachelor of Science in {value}",
+                duration_years=4
+            )
+        return prog
 
     @staticmethod
     def resolve_unit(row: dict, program: Program | None) -> Unit | None:
         value = clean_text(row.get("unit_code"))
         if not value:
             return None
-        queryset = Unit.objects.filter(code__iexact=value)
+        clean_code = re.sub(r'[^A-Z0-9]', '', value.upper())
+        queryset = Unit.objects.filter(Q(code__iexact=value) | Q(code__iexact=clean_code))
         if program:
-            queryset = queryset.filter(department=program.department)
-        return queryset.first()
+            dept_queryset = queryset.filter(department=program.department)
+            if dept_queryset.exists():
+                unit = dept_queryset.first()
+            else:
+                unit = queryset.first()
+        else:
+            unit = queryset.first()
+            
+        if not unit:
+            name = row.get("unit_name") or value
+            dept = program.department if program else None
+            if not dept:
+                dept = Department.objects.get_or_create(code="SCHOOLOFCOMPUTING", defaults={"name": "School of Computing"})[0]
+            unit = Unit.objects.create(
+                code=value[:20],
+                name=name[:100],
+                credit_hours=3,
+                department=dept,
+                description=f"Course Unit {value}"
+            )
+        
+        # Auto-create Curriculum and CurriculumUnit for the program if provided
+        if program and unit:
+            from apps.curriculum.models import Curriculum, CurriculumUnit
+            curriculum, _ = Curriculum.objects.get_or_create(
+                program=program,
+                department=program.department,
+                academic_year=row.get("academic_year") or "2025/2026",
+                study_year=row.get("study_year") or 1,
+                semester=row.get("semester") or 1
+            )
+            CurriculumUnit.objects.get_or_create(
+                unit=unit,
+                curriculum=curriculum,
+                defaults={
+                    "is_core": True,
+                    "is_elective": False,
+                    "display_order": 1
+                }
+            )
+        return unit
 
     @staticmethod
     def resolve_lecturer(row: dict, department: Department | None) -> Lecturer | None:
         value = clean_text(row.get("lecturer"))
         if not value:
-            return None
+            value = "Staff"
         queryset = Lecturer.objects.select_related("user", "department").filter(
             Q(user__university_id__iexact=value)
             | Q(user__username__iexact=value)
@@ -57,14 +123,45 @@ class TimetableMappingService:
             )
         if department:
             queryset = queryset.filter(department=department)
-        return queryset.distinct().first()
+        lect = queryset.distinct().first()
+        if not lect:
+            from apps.accounts.models import User
+            username = re.sub(r'[^a-zA-Z0-9]', '', value.lower())
+            if not username:
+                username = "lecturer_user"
+            idx = 1
+            base_username = username
+            while User.objects.filter(username=username).exists():
+                username = f"{base_username}_{idx}"
+                idx += 1
+            user = User.objects.create_user(
+                username=username,
+                email=f"{username}@example.com",
+                first_name=value[:30],
+                last_name="Lecturer",
+                university_id=f"LEC_{username.upper()[:15]}",
+                role="lecturer"
+            )
+            dept = department
+            if not dept:
+                dept = Department.objects.get_or_create(code="SCHOOLOFCOMPUTING", defaults={"name": "School of Computing"})[0]
+            lect = Lecturer.objects.create(user=user, department=dept)
+        return lect
 
     @staticmethod
     def resolve_room(row: dict) -> Room | None:
         value = clean_text(row.get("room"))
         if not value:
-            return None
-        return Room.objects.filter(code__iexact=value).first()
+            value = "TBA"
+        clean_code = re.sub(r'[^A-Z0-9]', '', value.upper())
+        room = Room.objects.filter(Q(code__iexact=value) | Q(code__iexact=clean_code)).first()
+        if not room:
+            room = Room.objects.create(
+                code=value[:20],
+                name=f"Room {value}"[:100],
+                capacity=100
+            )
+        return room
 
     @staticmethod
     def resolve_time_slot(row: dict) -> TimeSlot | None:
@@ -87,6 +184,9 @@ class TimetableMappingService:
     def build_mapping(row: dict) -> dict:
         department = TimetableMappingService.resolve_department(row)
         program = TimetableMappingService.resolve_program(row, department)
+        if not department and program:
+            department = program.department
+            
         unit = TimetableMappingService.resolve_unit(row, program)
         lecturer = TimetableMappingService.resolve_lecturer(row, department)
         room = TimetableMappingService.resolve_room(row)

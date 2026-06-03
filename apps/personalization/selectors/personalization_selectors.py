@@ -55,9 +55,7 @@ class PersonalizationSelector:
 			UnitEnrollment.objects.select_related(
 				"student",
 				"term",
-				"curriculum_unit",
-				"curriculum_unit__unit",
-				"curriculum_unit__curriculum",
+				"unit",
 			)
 			.filter(
 				student_id=student.id,
@@ -65,7 +63,7 @@ class PersonalizationSelector:
 				term__academic_year=academic_year,
 				term__semester=semester,
 			)
-			.order_by("curriculum_unit__display_order", "curriculum_unit__unit__code")
+			.order_by("unit__code")
 		)
 
 	@staticmethod
