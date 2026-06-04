@@ -5,8 +5,9 @@ django-filter==24.3
 djangorestframework_simplejwt==5.5.1
 psycopg==3.3.4
 gunicorn==26.0.0
-python-dotenv
 pandas==2.3.3
 openpyxl==3.1.5
+python-dateutil==2.9.0.post0
 pytz==2026.2
 requests
+sqlparse==0.5.5
