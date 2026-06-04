@@ -1,12 +1,3 @@
-<<<<<<< HEAD
-from django.contrib import admin
-from apps.timetable.models import (
-    AcademicTerm,
-    TimetableUploadBatch,
-    TimetableSlot,
-    TimetableConflict,
-)
-=======
 """
 Admin configuration for timetable app.
 
@@ -18,12 +9,18 @@ Production-level admin interface for:
 """
 
 from django.contrib import admin
+from django.db.models import Q
 from django.utils.html import format_html
-from django.urls import reverse
-from django.db.models import Count, F, Q
 from django.utils.translation import gettext_lazy as _
 
-from apps.timetable.models import TimeSlot, TimetableSession, AcademicTerm, TimetableConflict, TimetableSlot, TimetableUploadBatch
+from apps.timetable.models import (
+    AcademicTerm,
+    TimeSlot,
+    TimetableConflict,
+    TimetableSession,
+    TimetableSlot,
+    TimetableUploadBatch,
+)
 
 
 @admin.register(TimeSlot)
@@ -125,7 +122,7 @@ class TimetableSessionAdmin(admin.ModelAdmin):
     )
     search_fields = (
         "unit__code",
-        "unit__title",
+        "unit__name",
         "program__name",
         "room__code",
         "lecturer__user__last_name",
@@ -269,7 +266,6 @@ class TimetableSessionAdmin(admin.ModelAdmin):
         self.message_user(request, f"{updated} sessions cancelled")
 
     cancel_sessions.short_description = _("Cancel selected sessions")
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
 
 
 @admin.register(AcademicTerm)
@@ -283,10 +279,7 @@ class AcademicTermAdmin(admin.ModelAdmin):
 class TimetableUploadBatchAdmin(admin.ModelAdmin):
     list_display = ("id", "status", "rows_received", "rows_saved", "created_at")
     list_filter = ("status", "created_at")
-<<<<<<< HEAD
-    search_fields = ("status",)
-=======
-    search_fields = ("uploaded_by__user__last_name", "id")
+    search_fields = ("status", "uploaded_by__first_name", "uploaded_by__last_name", "id")
     readonly_fields = ("id", "source_file", "created_at", "updated_at")
     date_hierarchy = "created_at"
 
@@ -312,45 +305,15 @@ class TimetableUploadBatchAdmin(admin.ModelAdmin):
         ),
     )
 
-    def id_short(self, obj):
-        return str(obj.id)[:8]
-
-    id_short.short_description = _("ID")
-
-    def uploaded_by_name(self, obj):
-        return obj.uploaded_by.get_full_name()
-
-    uploaded_by_name.short_description = _("Uploaded By")
-
-    def status_badge(self, obj):
-        colors = {
-            "received": "blue",
-            "validated": "orange",
-            "processed": "green",
-            "failed": "red",
-        }
-        color = colors.get(obj.status, "gray")
-        return format_html(
-            '<span style="background-color: {}; color: white; padding: 3px 10px; border-radius: 3px;">{}</span>',
-            color,
-            obj.get_status_display(),
-        )
-
-    status_badge.short_description = _("Status")
-
-    def created_at_short(self, obj):
-        return obj.created_at.strftime("%Y-%m-%d %H:%M")
-
-    created_at_short.short_description = _("Uploaded")
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
-
 
 @admin.register(TimetableSlot)
 class TimetableSlotAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "term",
-        "curriculum_unit",
+        "unit",
+        "program",
+        "year_of_study",
         "lecturer",
         "room",
         "day_of_week",
@@ -359,25 +322,19 @@ class TimetableSlotAdmin(admin.ModelAdmin):
     )
     list_filter = ("term", "day_of_week", "room")
     search_fields = (
-<<<<<<< HEAD
-        "curriculum_unit__unit__code",
-        "curriculum_unit__unit__name",
+        "unit__code",
+        "unit__name",
         "room__code",
         "room__building",
         "lecturer__user__university_id",
-=======
-        "unit__code",
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
         "lecturer__user__first_name",
         "lecturer__user__last_name",
         "class_group",
     )
-<<<<<<< HEAD
-=======
     ordering = ("term", "day_of_week", "start_time")
     readonly_fields = ("id", "created_at", "updated_at", "conflict_count")
     date_hierarchy = "created_at"
-    
+
     fieldsets = (
         ("Session Details", {
             "fields": (
@@ -385,20 +342,20 @@ class TimetableSlotAdmin(admin.ModelAdmin):
                 "unit",
                 "program",
                 "year_of_study",
-                "class_group"
+                "class_group",
             )
         }),
         ("Schedule", {
             "fields": (
                 "day_of_week",
                 "start_time",
-                "end_time"
+                "end_time",
             )
         }),
         ("Resources", {
             "fields": (
                 "lecturer",
-                "room"
+                "room",
             )
         }),
         ("Upload Tracking", {
@@ -414,93 +371,52 @@ class TimetableSlotAdmin(admin.ModelAdmin):
             "classes": ("collapse",)
         }),
     )
-    
-    def get_unit_code(self, obj):
-        """Display unit code from related unit."""
-        return obj.unit.code
-    get_unit_code.short_description = "Unit"
-    get_unit_code.admin_order_field = "unit__code"
-    
-    def get_lecturer_name(self, obj):
-        """Display lecturer's full name."""
-        return obj.lecturer.user.get_full_name()
-    get_lecturer_name.short_description = "Lecturer"
-    get_lecturer_name.admin_order_field = "lecturer__user__first_name"
-    
-    def time_slot(self, obj):
-        """Display formatted time slot."""
-        return f"{obj.start_time} - {obj.end_time}"
-    time_slot.short_description = "Time"
-    
+
     def conflict_count(self, obj):
         """Display count of conflicts involving this slot."""
         count = TimetableConflict.objects.filter(
             Q(slot_a=obj) | Q(slot_b=obj)
         ).count()
-        
+
         if count == 0:
             return format_html(
                 '<span style="color: #198754;">No conflicts</span>'
             )
-        else:
-            return format_html(
-                f'<span style="color: #dc3545; font-weight: bold;">{count} conflicts</span>'
-            )
+        return format_html(
+            f'<span style="color: #dc3545; font-weight: bold;">{count} conflicts</span>'
+        )
+
     conflict_count.short_description = "Conflict Status"
-    
-    def conflict_status(self, obj):
-        """Display conflict status badge."""
-        conflicts = TimetableConflict.objects.filter(
-            Q(slot_a=obj) | Q(slot_b=obj)
-        ).count()
-        
-        if conflicts == 0:
-            return format_html(
-                '<span style="background-color: #198754; color: white; '
-                'padding: 3px 8px; border-radius: 3px;">✓ OK</span>'
-            )
-        else:
-            return format_html(
-                f'<span style="background-color: #dc3545; color: white; '
-                f'padding: 3px 8px; border-radius: 3px;">⚠ {conflicts}</span>'
-            )
-    conflict_status.short_description = "Status"
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
 
 
 @admin.register(TimetableConflict)
 class TimetableConflictAdmin(admin.ModelAdmin):
-<<<<<<< HEAD
-    list_display = ("id", "conflict_type", "term", "created_at")
-    list_filter = ("conflict_type", "term")
-    search_fields = ("conflict_type",)
-=======
     """Admin for TimetableConflict model."""
-    
+
     list_display = (
         "id",
         "conflict_type_badge",
         "term",
         "slot_a_info",
         "slot_b_info",
-        "created_at"
+        "created_at",
     )
     list_filter = ("conflict_type", "term", "created_at")
     search_fields = (
         "slot_a__unit__code",
         "slot_b__unit__code",
         "slot_a__room__code",
-        "slot_b__room__code"
+        "slot_b__room__code",
     )
     ordering = ("-created_at",)
     readonly_fields = (
         "id",
         "created_at",
         "updated_at",
-        "formatted_details"
+        "formatted_details",
     )
     date_hierarchy = "created_at"
-    
+
     fieldsets = (
         ("Conflict Information", {
             "fields": ("conflict_type", "term")
@@ -516,48 +432,53 @@ class TimetableConflictAdmin(admin.ModelAdmin):
             "classes": ("collapse",)
         }),
     )
-    
+
     def conflict_type_badge(self, obj):
         """Display conflict type as color-coded badge."""
         colors = {
             "room": "#0d6efd",
             "lecturer": "#ffc107",
-            "program": "#dc3545"
+            "program": "#dc3545",
         }
         icons = {
             "room": "🏛",
             "lecturer": "👨‍🏫",
-            "program": "📚"
+            "program": "📚",
         }
         color = colors.get(obj.conflict_type, "#6c757d")
         icon = icons.get(obj.conflict_type, "")
-        
+
         return format_html(
             f'<span style="background-color: {color}; color: white; '
             f'padding: 5px 10px; border-radius: 3px; font-weight: bold;">'
             f'{icon} {obj.get_conflict_type_display()}</span>'
         )
+
     conflict_type_badge.short_description = "Type"
-    
+
     def slot_a_info(self, obj):
         """Display info about first conflicting slot."""
-        return f"{obj.slot_a.unit.code} {obj.slot_a.get_day_of_week_display()}"
+        unit_code = obj.slot_a.unit.code if obj.slot_a.unit else "N/A"
+        return f"{unit_code} {obj.slot_a.get_day_of_week_display()}"
+
     slot_a_info.short_description = "Slot A"
-    
+
     def slot_b_info(self, obj):
         """Display info about second conflicting slot."""
-        return f"{obj.slot_b.unit.code} {obj.slot_b.get_day_of_week_display()}"
+        unit_code = obj.slot_b.unit.code if obj.slot_b.unit else "N/A"
+        return f"{unit_code} {obj.slot_b.get_day_of_week_display()}"
+
     slot_b_info.short_description = "Slot B"
-    
+
     def formatted_details(self, obj):
         """Display conflict details as formatted HTML."""
         if not obj.details:
             return "No details"
-        
+
         try:
             details = obj.details
             html = "<dl style='margin: 0;'>"
-            
+
             for key, value in details.items():
                 if isinstance(value, dict):
                     html += f"<dt><strong>{key}:</strong></dt><dd>"
@@ -566,10 +487,10 @@ class TimetableConflictAdmin(admin.ModelAdmin):
                     html += "</dd>"
                 else:
                     html += f"<dt><strong>{key}:</strong></dt><dd>{value}</dd>"
-            
+
             html += "</dl>"
             return format_html(html)
         except Exception as e:
             return f"Error displaying details: {str(e)}"
+
     formatted_details.short_description = "Conflict Details"
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b

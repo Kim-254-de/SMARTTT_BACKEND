@@ -151,14 +151,9 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "term",
-<<<<<<< HEAD
-            "curriculum_unit",
-            "curriculum_unit_display",
-=======
             "unit",
             "program",
             "year_of_study",
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
             "lecturer",
             "lecturer_display",
             "room",
@@ -266,4 +261,3 @@ class ConflictResponseSerializer(serializers.Serializer):
     summary = serializers.DictField()
     conflicts = ConflictDetailSerializer(many=True)
     message = serializers.CharField()
-
