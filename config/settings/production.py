@@ -15,7 +15,9 @@ render_host = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 if render_host and render_host not in ALLOWED_HOSTS:
 	ALLOWED_HOSTS.append(render_host)
 if not ALLOWED_HOSTS:
-	ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+	raise ImproperlyConfigured(
+		"Set DJANGO_ALLOWED_HOSTS or provide RENDER_EXTERNAL_HOSTNAME in production."
+	)
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True") == "True"
