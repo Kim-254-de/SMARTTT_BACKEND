@@ -561,8 +561,3 @@ class StudentEnrollment(BaseModel):
             self.EnrollmentStatus.ENROLLED,
             self.EnrollmentStatus.DEFERRED,
         ]
-<<<<<<< HEAD
-=======
-
-
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
