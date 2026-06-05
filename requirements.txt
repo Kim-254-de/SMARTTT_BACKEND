@@ -1,8 +1,4 @@
-anaconda-anon-usage @ file:///opt/miniconda3/conda-bld/anaconda-anon-usage_1764636648062/work
-anaconda-auth @ file:///home/task_177249124085225/croot/anaconda-cloud-auth-split_1772491269211/work
-anaconda-cli-base @ file:///home/task_177038556646156/croot/anaconda-cli-base_1770385830159/work
-annotated-types @ file:///home/task_176174487847081/conda-bld/annotated-types_1761744928471/work
-anthropic==0.91.0
+
 anyio @ file:///home/task_175862240717140/conda-bld/anyio_1758622421932/work
 archspec @ file:///home/task_175812491784513/conda-bld/archspec_1758124989039/work
 asgiref==3.11.1
@@ -13,12 +9,7 @@ cffi @ file:///home/task_176183214835616/conda-bld/cffi_1761832774688/work
 charset-normalizer @ file:///home/task_176174481524083/conda-bld/charset-normalizer_1761744828711/work
 click @ file:///home/task_176433224228540/conda-bld/click_1764332256338/work
 conda @ file:///home/task_177140125005974/croot/conda_1771402194624/work/conda-src
-conda-anaconda-telemetry @ file:///croot/conda-anaconda-telemetry_1755883788794/work
-conda-anaconda-tos @ file:///croot/conda-anaconda-tos_1755123313635/work
-conda-content-trust @ file:///work/perseverance-python-buildout/croot/conda-content-trust_1728487058234/work
-conda-libmamba-solver @ file:///C:/miniconda3/conda-bld/conda-libmamba-solver_1764245615235/work/src
-conda-package-handling @ file:///home/task_176236637997838/conda-bld/conda-package-handling_1762366405159/work
-conda_package_streaming @ file:///home/task_176236152622180/conda-bld/conda-package-streaming_1762361633858/work
+
 cryptography @ file:///home/task_177247526678653/croot/cryptography-split_1772475308901/work
 distro @ file:///work/perseverance-python-buildout/croot/distro_1728396110052/work
 Django==5.2.14
@@ -54,7 +45,7 @@ langgraph-checkpoint==4.0.1
 langgraph-prebuilt==1.0.9
 langgraph-sdk==0.3.13
 langsmith==0.7.26
-libmambapy @ file:///home/task_176311149180614/conda-bld/mamba-split_1763111570862/work/libmambapy
+
 markdown-it-py @ file:///home/task_176700162971740/croot/markdown-it-py_1767001650253/work
 mdurl @ file:///home/task_175855216352428/conda-bld/mdurl_1758552176751/work
 menuinst @ file:///home/task_176538230483207/conda-bld/menuinst_1765382366331/work
