@@ -261,7 +261,7 @@ class TimetableSessionAdmin(admin.ModelAdmin):
         self.message_user(request, f"{updated} sessions cancelled")
 
     cancel_sessions.short_description = _("Cancel selected sessions")
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
+
 
 
 @admin.register(AcademicTerm)
@@ -275,9 +275,7 @@ class AcademicTermAdmin(admin.ModelAdmin):
 class TimetableUploadBatchAdmin(admin.ModelAdmin):
     list_display = ("id", "status", "rows_received", "rows_saved", "created_at")
     list_filter = ("status", "created_at")
-<<<<<<< HEAD
-    search_fields = ("status",)
-=======
+
     search_fields = ("uploaded_by__user__last_name", "id")
     readonly_fields = ("id", "source_file", "created_at", "updated_at")
     date_hierarchy = "created_at"
@@ -334,7 +332,7 @@ class TimetableUploadBatchAdmin(admin.ModelAdmin):
         return obj.created_at.strftime("%Y-%m-%d %H:%M")
 
     created_at_short.short_description = _("Uploaded")
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
+
 
 
 @admin.register(TimetableSlot)
@@ -351,21 +349,19 @@ class TimetableSlotAdmin(admin.ModelAdmin):
     )
     list_filter = ("term", "day_of_week", "room")
     search_fields = (
-<<<<<<< HEAD
         "curriculum_unit__unit__code",
         "curriculum_unit__unit__name",
         "room__code",
         "room__building",
         "lecturer__user__university_id",
-=======
+
         "unit__code",
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
+
         "lecturer__user__first_name",
         "lecturer__user__last_name",
         "class_group",
     )
-<<<<<<< HEAD
-=======
+
     ordering = ("term", "day_of_week", "start_time")
     readonly_fields = ("id", "created_at", "updated_at", "conflict_count")
     date_hierarchy = "created_at"
@@ -457,7 +453,7 @@ class TimetableSlotAdmin(admin.ModelAdmin):
                 f'padding: 3px 8px; border-radius: 3px;">⚠ {conflicts}</span>'
             )
     conflict_status.short_description = "Status"
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
+
 
 
 @admin.register(TimetableConflict)
@@ -466,7 +462,7 @@ class TimetableConflictAdmin(admin.ModelAdmin):
     list_display = ("id", "conflict_type", "term", "created_at")
     list_filter = ("conflict_type", "term")
     search_fields = ("conflict_type",)
-=======
+
     """Admin for TimetableConflict model."""
     
     list_display = (
@@ -564,4 +560,4 @@ class TimetableConflictAdmin(admin.ModelAdmin):
         except Exception as e:
             return f"Error displaying details: {str(e)}"
     formatted_details.short_description = "Conflict Details"
->>>>>>> ee31cab66c0474900ecd8694bbe0aa38c2c4fc1b
+
