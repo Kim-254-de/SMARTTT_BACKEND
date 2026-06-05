@@ -340,7 +340,7 @@ class TimetableSlotAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "term",
-        "curriculum_unit",
+        "unit",
         "lecturer",
         "room",
         "day_of_week",
