@@ -1,12 +1,4 @@
-<<<<<<< HEAD
-from django.contrib import admin
-from apps.timetable.models import (
-    AcademicTerm,
-    TimetableUploadBatch,
-    TimetableSlot,
-    TimetableConflict,
-)
-=======
+
 """
 Admin configuration for timetable app.
 
