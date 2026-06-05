@@ -458,10 +458,6 @@ class TimetableSlotAdmin(admin.ModelAdmin):
 
 @admin.register(TimetableConflict)
 class TimetableConflictAdmin(admin.ModelAdmin):
-<<<<<<< HEAD
-    list_display = ("id", "conflict_type", "term", "created_at")
-    list_filter = ("conflict_type", "term")
-    search_fields = ("conflict_type",)
 
     """Admin for TimetableConflict model."""
     
