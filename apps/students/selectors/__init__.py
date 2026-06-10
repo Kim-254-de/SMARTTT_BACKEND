@@ -67,7 +67,8 @@ class StudentSelector:
                 | Q(email__icontains=search)
             )
 
-        return queryset.order_by(ordering).distinct()
+        # Only use .distinct() if filters might cause duplicate rows (e.g. M2M joins)
+        return queryset.order_by(ordering)
 
     @staticmethod
     def get_student_by_id(student_id) -> Optional[Student]:

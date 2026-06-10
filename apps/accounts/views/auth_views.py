@@ -5,12 +5,11 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.db import transaction
-from datetime import datetime
+from django.utils import timezone
 import re
 
 from apps.accounts.models import User
-from apps.departments.models import Department
-from apps.departments.models.models import Faculty # Ensure this import path is consistent
+from apps.departments.models import Department, Faculty
 from apps.programs.models.program import Program
 from apps.students.models.student import Student
 from apps.timetable.models import AcademicTerm
@@ -32,8 +31,8 @@ def serialize_user(user):
         "email": user.email,
         "full_name": user.get_full_name(),
         "admission_number": user.university_id,
-        "course": program.name if program else None,
-        "department": department.name if department else None,
+        "course": getattr(program, 'name', None),
+        "department": getattr(department, 'name', None),
         "year_of_study": getattr(student, 'current_study_year', None),
     }
 
@@ -109,7 +108,7 @@ class RegisterView(APIView):
             if not reg_num:
                 reg_num = f"STU-{user.id}"
 
-            admission_yr = datetime.now().year
+            admission_yr = timezone.now().year
             if reg_num:
                 match = re.search(r'[/\-](\d{2,4})$', reg_num.strip())
                 if match:
