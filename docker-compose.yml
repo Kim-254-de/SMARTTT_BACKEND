@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:15
+    container_name: smarttt_postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    environment:
+      - POSTGRES_DB=smarttt_db
+      - POSTGRES_USER=smarttt_user
+      - POSTGRES_PASSWORD=smarttt_password
+    ports:
+      - "5433:5432"
+
+volumes:
+  postgres_data:

@@ -4,7 +4,8 @@ import sys
 
 
 def main() -> None:
-	os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
+	# Allow the environment to dictate settings, defaulting to base if not set
+	os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.base")
 	
 	# Load .env file if it exists
 	try:

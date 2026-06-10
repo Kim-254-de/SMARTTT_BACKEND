@@ -10,9 +10,10 @@ import re
 
 from apps.accounts.models import User
 from apps.departments.models import Department
-from apps.departments.models.models import Faculty
+from apps.departments.models.models import Faculty # Ensure this import path is consistent
 from apps.programs.models.program import Program
 from apps.students.models.student import Student
+from apps.timetable.models import AcademicTerm
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -23,14 +24,17 @@ def get_tokens_for_user(user):
 
 def serialize_user(user):
     student = getattr(user, 'student_profile', None)
+    program = getattr(student, 'program', None)
+    department = getattr(program, 'department', None) if program else None
+    
     return {
         "id": user.id,
         "email": user.email,
         "full_name": user.get_full_name(),
         "admission_number": user.university_id,
-        "course": student.program.name if student and student.program else None,
-        "department": student.program.department.name if student and student.program and student.program.department else None,
-        "year_of_study": student.current_study_year if student else None,
+        "course": program.name if program else None,
+        "department": department.name if department else None,
+        "year_of_study": getattr(student, 'current_study_year', None),
     }
 
 class RegisterView(APIView):
@@ -73,11 +77,10 @@ class RegisterView(APIView):
             dept_code = re.sub(r'[^A-Z]', '', department_name.upper())[:20]
             if not dept_code: dept_code = department_name.upper()[:20]
 
-            # Get or create a default faculty (required by Department FK)
-            fac_code = dept_code[:10] if dept_code else 'DEFAULT'
+            # Use a generic faculty instead of naming it after the department
             faculty, _ = Faculty.objects.get_or_create(
-                name=department_name,
-                defaults={'code': fac_code}
+                code="GEN",
+                defaults={'name': 'General Faculty'}
             )
             
             department, _ = Department.objects.get_or_create(
@@ -120,7 +123,6 @@ class RegisterView(APIView):
                     if match:
                         admission_yr = 2000 + int(match.group(1))
 
-            from apps.timetable.models import AcademicTerm
             current_term = AcademicTerm.objects.filter(is_current=True).first()
             current_sem = current_term.semester if current_term else 1
 
