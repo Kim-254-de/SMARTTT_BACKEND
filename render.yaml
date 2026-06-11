@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: smarttt-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash render_start.sh
+    healthCheckPath: /admin/
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.production
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false        # fill in the Render dashboard after first deploy
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false
+      - key: CORS_ALLOW_ALL_ORIGINS
+        value: "False"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smarttt-db
+          property: connectionString
+
+databases:
+  - name: smarttt-db
+    databaseName: smarttt_db
+    user: smarttt_user
+    plan: free
