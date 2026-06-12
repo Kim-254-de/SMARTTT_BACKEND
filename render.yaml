@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: smarttt-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash render_start.sh
+    healthCheckPath: /admin/
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.production
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false   # Set in Render dashboard: e.g. smarttt-backend.onrender.com
+      - key: DATABASE_URL
+        sync: false   # Paste your free Neon/Supabase connection string here
+      - key: CORS_ALLOW_ALL_ORIGINS
+        value: "False"
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false   # e.g. https://your-frontend.vercel.app
+      - key: CSRF_TRUSTED_ORIGINS
+        sync: false   # e.g. https://smarttt-backend.onrender.com,https://your-frontend.vercel.app
