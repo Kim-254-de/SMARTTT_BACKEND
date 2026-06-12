@@ -16,7 +16,7 @@ else:
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-dev-secret-key")
 DEBUG = False
-ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1", "smarttt-backend-n44z.onrender.com", "localhost").split(",")
+ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1, smarttt-backend-n44z.onrender.com, localhost").split(",")
 
 INSTALLED_APPS = [
 	"django.contrib.admin",
