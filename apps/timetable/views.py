@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.generics import ListAPIView, RetrieveAPIView
+from rest_framework.generics import DestroyAPIView, ListAPIView, RetrieveAPIView
 from rest_framework.parsers import MultiPartParser
 from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
@@ -70,3 +70,59 @@ class TimetableUploadDetailView(RetrieveAPIView):
     serializer_class = TimetableUploadSerializer
     permission_classes = [IsAdminUser]
     lookup_field = "pk"
+
+
+class TimetableUploadListView(ListAPIView):
+    """GET /api/v1/timetable/upload/list/ — list all uploads, newest first."""
+    queryset = TimetableUpload.objects.select_related("uploaded_by", "term").all()
+    serializer_class = TimetableUploadSerializer
+    permission_classes = [IsAdminUser]
+
+
+class TimetableUploadDeleteView(DestroyAPIView):
+    """
+    DELETE /api/v1/timetable/upload/<uuid:pk>/delete/
+    Deletes the upload record. Does NOT delete the TimetableSlot rows it created
+    (those are shared/deduped across uploads via update_or_create) — only removes
+    the audit record. To clear slots for a term, use the term-clear endpoint instead.
+    """
+    queryset = TimetableUpload.objects.all()
+    permission_classes = [IsAdminUser]
+    lookup_field = "pk"
+
+
+class AcademicTermSetCurrentView(APIView):
+    """
+    POST /api/v1/timetable/terms/<uuid:pk>/set-current/
+    Marks this term as current, unmarking all others.
+    """
+    permission_classes = [IsAdminUser]
+
+    def post(self, request, pk):
+        try:
+            term = AcademicTerm.objects.get(pk=pk)
+        except AcademicTerm.DoesNotExist:
+            return Response({"detail": "Term not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        AcademicTerm.objects.filter(is_current=True).update(is_current=False)
+        term.is_current = True
+        term.save(update_fields=["is_current"])
+        return Response({"detail": f"{term} is now the current term."})
+
+
+class TimetableSlotsClearView(APIView):
+    """
+    DELETE /api/v1/timetable/terms/<uuid:pk>/clear-slots/
+    Deletes all TimetableSlot rows for a given term — useful before re-uploading
+    a corrected file for the same term.
+    """
+    permission_classes = [IsAdminUser]
+
+    def delete(self, request, pk):
+        try:
+            term = AcademicTerm.objects.get(pk=pk)
+        except AcademicTerm.DoesNotExist:
+            return Response({"detail": "Term not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        deleted_count, _ = TimetableSlot.objects.filter(term=term).delete()
+        return Response({"detail": f"Deleted {deleted_count} slot(s) for {term}."})
