@@ -1,0 +1,15 @@
+Django==5.1.0
+djangorestframework==3.17.1
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.9.0
+django-filter==24.3
+dj-database-url==3.1.2
+psycopg[binary]==3.3.4
+whitenoise[brotli]==6.9.0
+python-dotenv==1.0.1
+pandas==2.3.3
+openpyxl==3.1.5
+requests==2.32.3
+beautifulsoup4==4.13.4
+Pillow==11.2.1
+gunicorn==26.0.0
