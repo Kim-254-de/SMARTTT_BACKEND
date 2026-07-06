@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "apps.timetable",
     "apps.courses",
     "apps.schedule",
+    "apps.notifications",
 ]
 
 MIDDLEWARE = [
