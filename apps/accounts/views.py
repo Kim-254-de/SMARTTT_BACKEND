@@ -10,7 +10,11 @@ import requests
 from .models import User
 from .serializers import LoginSerializer, RegisterSerializer, UserSerializer
 
-GOOGLE_TOKEN_INFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+# Firebase token verification — accepts Firebase ID tokens (what Flutter sends)
+FIREBASE_VERIFY_URL = (
+    "https://identitytoolkit.googleapis.com/v1/accounts:lookup"
+    "?key=AIzaSyAwYcCoaR0pRPli20r0LQIy3h-R1lHep1c"
+)
 
 
 def _tokens(user):
@@ -88,8 +92,12 @@ class ProfileView(APIView):
 class GoogleAuthView(APIView):
     """
     POST /api/v1/auth/google/
-    Body: { "id_token": "<Google ID token from Firebase>" }
+    Body: { "id_token": "<Firebase ID token>" }
     Returns: { "user": {...}, "access": "...", "refresh": "..." }
+
+    Flutter sends a Firebase ID token (not a raw Google OAuth token).
+    We verify it via Firebase's accounts:lookup endpoint, which returns
+    the user's profile from Firebase Auth.
     """
     permission_classes = [AllowAny]
 
@@ -98,11 +106,11 @@ class GoogleAuthView(APIView):
         if not id_token:
             return Response({"detail": "id_token is required."}, status=400)
 
-        # Verify token with Google
+        # Verify Firebase ID token
         try:
-            resp = requests.get(
-                GOOGLE_TOKEN_INFO_URL,
-                params={"id_token": id_token},
+            resp = requests.post(
+                FIREBASE_VERIFY_URL,
+                json={"idToken": id_token},
                 timeout=10,
             )
             if resp.status_code != 200:
@@ -110,17 +118,24 @@ class GoogleAuthView(APIView):
                     {"detail": "Invalid Google token. Please try again."},
                     status=401,
                 )
-            google_data = resp.json()
+            firebase_data = resp.json()
         except requests.RequestException:
             return Response(
                 {"detail": "Could not verify token with Google. Check your connection."},
                 status=503,
             )
 
-        # Extract user info from verified token
-        email = google_data.get("email")
-        email_verified = google_data.get("email_verified") is True  # Fixed boolean check
-        full_name = google_data.get("name", "")
+        # Firebase returns a users array
+        users_list = firebase_data.get("users", [])
+        if not users_list:
+            return Response({"detail": "Token verification failed."}, status=401)
+
+        user_info = users_list[0]
+
+        # Extract user info — Firebase field names differ from Google's tokeninfo
+        email = user_info.get("email")
+        email_verified = user_info.get("emailVerified", False)
+        full_name = user_info.get("displayName", "")
 
         if not email:
             return Response({"detail": "Google account has no email address."}, status=400)
@@ -133,19 +148,19 @@ class GoogleAuthView(APIView):
             user = User.objects.filter(email=email.lower()).first()
 
             if user:
-                # Existing user — update name if they haven't set one yet
+                # Existing user — update name if not set
                 if not user.first_name and full_name:
                     parts = full_name.split(" ", 1)
                     user.first_name = parts[0]
                     user.last_name = parts[1] if len(parts) > 1 else ""
                     user.save(update_fields=["first_name", "last_name"])
             else:
-                # New user — create account from Google data
+                # New user — create from Google data, no password needed
                 parts = full_name.split(" ", 1) if full_name else ["", ""]
                 user = User.objects.create_user(
                     username=email.lower(),
                     email=email.lower(),
-                    password=None,  # No password — Google is the auth method
+                    password=None,
                     first_name=parts[0],
                     last_name=parts[1] if len(parts) > 1 else "",
                     role=User.Role.STUDENT,
