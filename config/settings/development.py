@@ -1,9 +1,6 @@
-from .base import *  # noqa: F403,F401
-import os
+from .base import *
 
 DEBUG = True
-ALLOWED_HOSTS = ["*"]
 CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
-
-# Inherits PostgreSQL configuration from base.py
+# Comment out or delete the os.getenv block temporarily
+ALLOWED_HOSTS = ["127.0.0.1", "localhost", "0.0.0.0"]

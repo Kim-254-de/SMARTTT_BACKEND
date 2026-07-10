@@ -1,47 +1,22 @@
-"""
-URL Configuration for timetable app.
-
-API Endpoints:
-- /api/v1/timetable/rooms/ - Room management
-- /api/v1/timetable/timeslots/ - TimeSlot management
-- /api/v1/timetable/sessions/ - Timetable session management
-- /api/v1/timetable/sessions/my-timetable/ - Student personalized timetable
-- /api/v1/timetable/sessions/lecturer-schedule/ - Lecturer teaching schedule
-- /api/v1/timetable/sessions/conflicts/ - Conflict reporting
-- /api/v1/timetable/terms/ - Academic terms management
-- /api/v1/timetable/slots/ - Timetable slots/sessions (legacy)
-- /api/v1/timetable/uploads/ - Upload history
-"""
-
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-
-from apps.timetable.views import (
-    RoomViewSet,
-    TimeSlotViewSet,
-    TimetableSessionViewSet,
-    AcademicTermViewSet,
-    TimetableConflictViewSet,
-    TimetableSlotViewSet,
-    TimetableUploadListViewSet,
-    TimetableUploadAPIView,
+from .views import (
+    AcademicTermViewSet, AcademicTermSetCurrentView, TimetableSlotListView,
+    TimetableSlotsClearView, TimetableUploadDeleteView, TimetableUploadDetailView,
+    TimetableUploadListView, TimetableUploadView, UnitViewSet,
 )
 
 router = DefaultRouter()
-
-# New production endpoints
-router.register("rooms", RoomViewSet, basename="room")
-router.register("timeslots", TimeSlotViewSet, basename="timeslot")
-router.register("sessions", TimetableSessionViewSet, basename="timetable-session")
-
-# Legacy endpoints (for backward compatibility)
-router.register("terms", AcademicTermViewSet, basename="academic-terms")
-router.register("slots", TimetableSlotViewSet, basename="timetable-slots")
-router.register("conflicts", TimetableConflictViewSet, basename="timetable-conflicts")
-router.register("uploads", TimetableUploadListViewSet, basename="timetable-uploads")
+router.register("terms", AcademicTermViewSet, basename="term")
+router.register("units", UnitViewSet, basename="unit")
 
 urlpatterns = [
     path("", include(router.urls)),
-    path("upload/", TimetableUploadAPIView.as_view(), name="timetable-upload"),
+    path("slots/", TimetableSlotListView.as_view(), name="timetable-slots"),
+    path("upload/", TimetableUploadView.as_view(), name="timetable-upload"),
+    path("upload/list/", TimetableUploadListView.as_view(), name="timetable-upload-list"),
+    path("upload/<uuid:pk>/", TimetableUploadDetailView.as_view(), name="timetable-upload-detail"),
+    path("upload/<uuid:pk>/delete/", TimetableUploadDeleteView.as_view(), name="timetable-upload-delete"),
+    path("terms/<uuid:pk>/set-current/", AcademicTermSetCurrentView.as_view(), name="term-set-current"),
+    path("terms/<uuid:pk>/clear-slots/", TimetableSlotsClearView.as_view(), name="term-clear-slots"),
 ]
-

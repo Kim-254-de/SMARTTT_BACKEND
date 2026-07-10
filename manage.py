@@ -2,24 +2,13 @@
 import os
 import sys
 
-
-def main() -> None:
-	# Allow the environment to dictate settings, defaulting to base if not set
-	os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.base")
-	
-	# Load .env file if it exists
-	try:
-		from dotenv import load_dotenv
-		from pathlib import Path
-		env_path = Path(__file__).resolve().parent / '.env'
-		if env_path.exists():
-			load_dotenv(env_path)
-	except ImportError:
-		pass  # dotenv not installed, rely on system environment variables
-	
-	from django.core.management import execute_from_command_line
-	execute_from_command_line(sys.argv)
-
+def main():
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError("Django not found in the current environment.") from exc
+    execute_from_command_line(sys.argv)
 
 if __name__ == "__main__":
-	main()
+    main()

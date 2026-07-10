@@ -1,10 +1,11 @@
 from django.contrib import admin
-
+from django.contrib.auth.admin import UserAdmin
 from .models import User
 
-
 @admin.register(User)
-class UserAdmin(admin.ModelAdmin):
-	list_display = ("username", "email", "role", "is_active")
-	list_filter = ("role", "is_active")
-	search_fields = ("username", "email", "university_id")
+class CustomUserAdmin(UserAdmin):
+    list_display = ["email", "university_id", "role", "is_active"]
+    list_filter = ["role", "is_active"]
+    fieldsets = UserAdmin.fieldsets + (
+        ("SMARTTT", {"fields": ("role", "university_id", "phone_number")}),
+    )

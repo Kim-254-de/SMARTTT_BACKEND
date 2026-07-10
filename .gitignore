@@ -1,19 +1,12 @@
-# Python cache and bytecode
 __pycache__/
 *.py[cod]
-*$py.class
-
-# Virtual environments
-.venv/
-venv/
-env/
-
-# Local IDE/editor settings
-.vscode/
-
-# OS files
-.DS_Store
-Thumbs.db
+*.pyo
 .env
-*.env.example
 *.sqlite3
+staticfiles/
+media/
+.DS_Store
+venv/
+*.egg-info/
+dist/
+build/
