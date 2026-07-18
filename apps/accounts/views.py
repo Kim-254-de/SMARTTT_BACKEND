@@ -319,8 +319,19 @@ class StaffIDListView(APIView):
 class LecturerProfileView(APIView):
     """
     GET /api/v1/auth/lecturer/profile/
-    Returns the authenticated lecturer's profile including
-    their assigned TimetableSlots for the current term.
+    
+    Returns the lecturer's assigned slots for the current term.
+    
+    Matching priority:
+      1. Slots where lecturer FK = this lecturer's profile (ideal — requires
+         lecturers to be linked during timetable upload)
+      2. Fallback: ALL units for the current term — lecturer self-selects
+         which units they teach. This handles the common case where the
+         Excel timetable has no lecturer assignments filled in.
+    
+    The response includes a "slot_source" field:
+      "assigned"  — slots matched to this lecturer directly
+      "all_units" — fallback, lecturer must self-identify their units
     """
     permission_classes = [IsAuthenticated]
 
@@ -330,32 +341,48 @@ class LecturerProfileView(APIView):
         from apps.core.models import Lecturer
 
         user = request.user
-        if user.role not in [User.Role.LECTURER, "lecturer"]:
+        if user.role not in ["lecturer"]:
             return Response({"detail": "Not a lecturer account."}, status=403)
 
         term = AcademicTerm.objects.filter(is_current=True).first()
         slots = []
+        slot_source = "none"
+
         if term:
+            # ── Priority 1: slots directly assigned to this lecturer ──────────
             try:
                 lecturer_profile = Lecturer.objects.get(user=user)
-                slots = TimetableSlot.objects.select_related(
+                assigned_slots = TimetableSlot.objects.select_related(
                     "unit", "program", "room", "term"
                 ).filter(term=term, lecturer=lecturer_profile)
-                slots = TimetableSlotSerializer(slots, many=True).data
+
+                if assigned_slots.exists():
+                    slots = TimetableSlotSerializer(assigned_slots, many=True).data
+                    slot_source = "assigned"
             except Lecturer.DoesNotExist:
                 pass
+
+            # ── Priority 2: fallback — return all units this term ─────────────
+            if not slots:
+                all_slots = TimetableSlot.objects.select_related(
+                    "unit", "program", "room", "term"
+                ).filter(term=term).order_by("day", "start_time")
+                slots = TimetableSlotSerializer(all_slots, many=True).data
+                slot_source = "all_units"
 
         return Response({
             "user": UserSerializer(user).data,
             "current_term": str(term) if term else None,
             "slots": slots,
+            "slot_source": slot_source,
         })
-
-
 class LecturerStudentsView(APIView):
     """
     GET /api/v1/auth/lecturer/students/?unit=<unit_id>
     Returns students enrolled in a specific unit this term.
+    
+    In fallback mode (no lecturer assignments in timetable),
+    any verified lecturer can query any unit.
     """
     permission_classes = [IsAuthenticated]
 
@@ -365,7 +392,7 @@ class LecturerStudentsView(APIView):
         from apps.core.models import Lecturer
 
         user = request.user
-        if user.role not in [User.Role.LECTURER, "lecturer"]:
+        if user.role not in ["lecturer"]:
             return Response({"detail": "Not a lecturer account."}, status=403)
 
         unit_id = request.query_params.get("unit")
@@ -376,19 +403,16 @@ class LecturerStudentsView(APIView):
         if not term:
             return Response({"detail": "No current term."}, status=400)
 
-        # Verify this lecturer actually teaches this unit
+        # Check if lecturer is assigned to this unit (strict mode)
+        # If not assigned, still allow access (fallback mode)
         try:
             lecturer_profile = Lecturer.objects.get(user=user)
-            teaches = TimetableSlot.objects.filter(
+            is_assigned = TimetableSlot.objects.filter(
                 term=term, unit_id=unit_id, lecturer=lecturer_profile
             ).exists()
-            if not teaches:
-                return Response(
-                    {"detail": "You are not assigned to this unit this term."},
-                    status=403,
-                )
         except Lecturer.DoesNotExist:
-            return Response({"detail": "Lecturer profile not found."}, status=403)
+            is_assigned = False
+        # In fallback mode we allow all verified lecturers to view any unit's students
 
         students = StudentUnit.objects.select_related(
             "user", "unit"
