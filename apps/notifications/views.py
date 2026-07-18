@@ -200,3 +200,53 @@ class UnreadCountView(APIView):
             user=request.user, is_read=False
         ).count()
         return Response({"unread_count": count})
+        
+        
+class LecturerSendNotificationView(APIView):
+    """
+    POST /api/v1/notifications/lecturer/send/
+    Allows lecturers to send notifications. Scoped to all students
+    (unit-level targeting will be added when unit-student linking is tighter).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        # Only lecturers can use this endpoint
+        if request.user.role != "lecturer":
+            return Response({"detail": "Only lecturers can use this endpoint."}, status=403)
+
+        title = request.data.get("title", "").strip()
+        message = request.data.get("message", "").strip()
+        notification_type = request.data.get("notification_type", "general")
+
+        if not title or not message:
+            return Response({"detail": "Title and message are required."}, status=400)
+
+        users = User.objects.filter(is_active=True, role="student")
+        users = list(users)
+
+        notification = Notification.objects.create(
+            sent_by=request.user,
+            title=title,
+            message=message,
+            notification_type=notification_type,
+            target=Notification.Target.ALL,
+            recipients_count=len(users),
+        )
+
+        StudentNotification.objects.bulk_create([
+            StudentNotification(user=user, notification=notification)
+            for user in users
+        ], ignore_conflicts=True)
+
+        from .fcm_service import send_to_tokens
+        user_ids = [u.id for u in users]
+        tokens = list(FCMToken.objects.filter(user_id__in=user_ids).values_list("token", flat=True))
+        fcm_success = send_to_tokens(tokens, title, message, data={"type": notification_type}) if tokens else 0
+
+        return Response({
+            "detail": "Notification sent.",
+            "recipients": len(users),
+            "push_sent": fcm_success,
+            "push_attempted": len(tokens),
+        }, status=201)
