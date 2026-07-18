@@ -205,25 +205,45 @@ class UnreadCountView(APIView):
 class LecturerSendNotificationView(APIView):
     """
     POST /api/v1/notifications/lecturer/send/
-    Allows lecturers to send notifications. Scoped to all students
-    (unit-level targeting will be added when unit-student linking is tighter).
+    Sends notification only to students enrolled in the specified unit this term.
+    Body: { "title": "...", "message": "...", "notification_type": "...", "unit_id": "<uuid>" }
     """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        # Only lecturers can use this endpoint
         if request.user.role != "lecturer":
             return Response({"detail": "Only lecturers can use this endpoint."}, status=403)
 
         title = request.data.get("title", "").strip()
         message = request.data.get("message", "").strip()
         notification_type = request.data.get("notification_type", "general")
+        unit_id = request.data.get("unit_id", "").strip()
 
         if not title or not message:
             return Response({"detail": "Title and message are required."}, status=400)
 
-        users = User.objects.filter(is_active=True, role="student")
-        users = list(users)
+        if not unit_id:
+            return Response({"detail": "unit_id is required."}, status=400)
+
+        # Get current term
+        from apps.timetable.models import AcademicTerm
+        term = AcademicTerm.objects.filter(is_current=True).first()
+        if not term:
+            return Response({"detail": "No current academic term set."}, status=400)
+
+        # Get only students enrolled in this specific unit this term
+        from apps.courses.models import StudentUnit
+        student_ids = StudentUnit.objects.filter(
+            unit_id=unit_id, term=term
+        ).values_list("user_id", flat=True)
+
+        users = list(User.objects.filter(id__in=student_ids, is_active=True))
+
+        if not users:
+            return Response({
+                "detail": "No students enrolled in this unit for the current term.",
+                "recipients": 0,
+            }, status=200)
 
         notification = Notification.objects.create(
             sent_by=request.user,
@@ -239,7 +259,6 @@ class LecturerSendNotificationView(APIView):
             for user in users
         ], ignore_conflicts=True)
 
-        from .fcm_service import send_to_tokens
         user_ids = [u.id for u in users]
         tokens = list(FCMToken.objects.filter(user_id__in=user_ids).values_list("token", flat=True))
         fcm_success = send_to_tokens(tokens, title, message, data={"type": notification_type}) if tokens else 0
