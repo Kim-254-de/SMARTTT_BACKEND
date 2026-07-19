@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
-from .models import User
+from .models import PasswordResetToken, User
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
@@ -9,3 +9,10 @@ class CustomUserAdmin(UserAdmin):
     fieldsets = UserAdmin.fieldsets + (
         ("SMARTTT", {"fields": ("role", "university_id", "phone_number")}),
     )
+
+
+@admin.register(PasswordResetToken)
+class PasswordResetTokenAdmin(admin.ModelAdmin):
+    list_display = ["user", "expires_at", "used_at", "created_at"]
+    search_fields = ["user__email", "token"]
+    list_filter = ["used_at", "created_at"]

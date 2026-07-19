@@ -31,11 +31,23 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt.token_blacklist",
     "django_filters",
     "apps.accounts",
+    "apps.analytics",
+    "apps.common",
     "apps.core",
-    "apps.timetable",
-    "apps.courses",
-    "apps.schedule",
+    "apps.curriculum",
+    "apps.departments",
+    "apps.enrollments",
+    "apps.lecturers",
     "apps.notifications",
+    "apps.personalization",
+    "apps.programs",
+    "apps.rooms",
+    "apps.schedule",
+    "apps.students",
+    "apps.timetable",
+    "apps.units",
+    "apps.uploads",
+    "apps.courses",
 ]
 
 MIDDLEWARE = [
@@ -103,6 +115,28 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
+)
+EMAIL_HOST = os.getenv("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "no-reply@smarttt.local")
+FRONTEND_RESET_PASSWORD_URL = os.getenv(
+    "FRONTEND_RESET_PASSWORD_URL",
+    "http://localhost:8080/reset-password",
+)
+
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher",
+    "django.contrib.auth.hashers.BCryptSHA256PasswordHasher",
+]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
