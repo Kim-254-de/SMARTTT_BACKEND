@@ -52,7 +52,6 @@ def _detect_grid(df: pd.DataFrame) -> bool:
 
 def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
     """Convert 2-D grid to flat rows."""
-    # ── locate the header row ────────────────────────────────────────────────
     header_row_idx = None
     col_map: dict[int, dict] = {}
 
@@ -64,7 +63,7 @@ def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
             break
 
     if header_row_idx is None:
-        return df  # fall back to flat
+        return df
 
     current_day = "MON"
     for col_idx in range(1, len(df.columns)):
@@ -80,7 +79,6 @@ def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
                 sh, eh = int(tm.group(1)), int(tm.group(2))
                 col_map[col_idx] = {"day": current_day, "start_time": _fmt_time(sh), "end_time": _fmt_time(eh)}
 
-    # ── extract academic year / semester from top rows ───────────────────────
     academic_year, semester = "2025/2026", 1
     for idx in range(min(header_row_idx + 1, 10)):
         text = " ".join(str(x) for x in df.iloc[idx].values if pd.notna(x))
@@ -91,7 +89,6 @@ def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
         if any(t in text.lower() for t in ["semester 2", "second semester"]):
             semester = 2
 
-    # ── iterate data rows ────────────────────────────────────────────────────
     flat_rows = []
     for row_idx in range(header_row_idx + 1, len(df)):
         cohort_val = df.iloc[row_idx, 0]
@@ -128,43 +125,43 @@ def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(flat_rows)
 
 
-def parse_excel(file) -> list[dict]:
-    """
-    Main entry point.
-    Returns a list of normalised dicts ready for the mapping service.
-    Raises ValueError if the file structure is unreadable.
-    """
-    try:
-        df = pd.read_excel(file, sheet_name=0, dtype=object, engine="openpyxl")
-    except Exception as exc:
-        raise ValueError(f"Cannot read Excel file: {exc}") from exc
+class TimetableExcelParserService:
+    @staticmethod
+    def parse_excel(file) -> list[dict]:
+        """
+        Main entry point.
+        Returns a list of normalised dicts ready for the mapping service.
+        Raises ValueError if the file structure is unreadable.
+        """
+        try:
+            df = pd.read_excel(file, sheet_name=0, dtype=object, engine="openpyxl")
+        except Exception as exc:
+            raise ValueError(f"Cannot read Excel file: {exc}") from exc
 
-    df = df.dropna(how="all").reset_index(drop=True)
+        df = df.dropna(how="all").reset_index(drop=True)
 
-    if _detect_grid(df):
-        df = _parse_grid(df)
-    else:
-        df.columns = [_normalise_col(c) for c in df.columns]
-        missing = REQUIRED_FLAT_COLS - set(df.columns)
-        if missing:
-            raise ValueError(f"Missing required columns: {missing}")
+        if _detect_grid(df):
+            df = _parse_grid(df)
+        else:
+            df.columns = [_normalise_col(c) for c in df.columns]
+            missing = REQUIRED_FLAT_COLS - set(df.columns)
+            if missing:
+                raise ValueError(f"Missing required columns: {missing}")
 
-    rows = []
-    for _, row in df.iterrows():
-        raw = {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
+        rows = []
+        for _, row in df.iterrows():
+            raw = {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
 
-        # normalise day
-        day_raw = str(raw.get("day", "")).strip().lower()[:3]
-        raw["day"] = DAY_MAP.get(day_raw, day_raw.upper())
+            # normalise day
+            day_raw = str(raw.get("day", "")).strip().lower()[:3]
+            raw["day"] = DAY_MAP.get(day_raw, day_raw.upper())
 
-        # normalise times — accept "08:00", "8", "8-10" etc.
-        for field in ("start_time", "end_time"):
-            val = str(raw.get(field, "")).strip()
-            # pure integer like "8"
-            if re.match(r"^\d{1,2}$", val):
-                raw[field] = _fmt_time(int(val))
-            # already HH:MM
-            elif re.match(r"^\d{1,2}:\d{2}$", val):
-                raw[field] = val
-        rows.append(raw)
-    return rows
+            # normalise times — accept "08:00", "8", "8-10" etc.
+            for field in ("start_time", "end_time"):
+                val = str(raw.get(field, "")).strip()
+                if re.match(r"^\d{1,2}$", val):
+                    raw[field] = _fmt_time(int(val))
+                elif re.match(r"^\d{1,2}:\d{2}$", val):
+                    raw[field] = val
+            rows.append(raw)
+        return rows
