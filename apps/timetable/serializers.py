@@ -30,13 +30,13 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
             "id", "term", "term_label", "unit", "unit_code", "unit_name",
             "program", "program_name", "year_of_study",
             "lecturer", "lecturer_name", "room", "room_code",
-            "day", "start_time", "end_time",
+            "day", "start_time", "end_time", "lecturer_name_text",
         ]
 
     def get_lecturer_name(self, obj):
         if obj.lecturer:
             return obj.lecturer.user.get_full_name()
-        return None
+        return obj.lecturer_name_text or None
 
 
 class TimetableUploadSerializer(serializers.ModelSerializer):
