@@ -9,6 +9,7 @@ whitenoise[brotli]==6.9.0
 python-dotenv==1.0.1
 pandas==2.3.3
 openpyxl==3.1.5
+pdfplumber==0.11.4
 requests==2.32.3
 beautifulsoup4==4.13.4
 Pillow==11.2.1

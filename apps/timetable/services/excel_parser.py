@@ -128,17 +128,7 @@ def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(flat_rows)
 
 
-def parse_excel(file) -> list[dict]:
-    """
-    Main entry point.
-    Returns a list of normalised dicts ready for the mapping service.
-    Raises ValueError if the file structure is unreadable.
-    """
-    try:
-        df = pd.read_excel(file, sheet_name=0, dtype=object, engine="openpyxl")
-    except Exception as exc:
-        raise ValueError(f"Cannot read Excel file: {exc}") from exc
-
+def normalise_dataframe(df: pd.DataFrame) -> list[dict]:
     df = df.dropna(how="all").reset_index(drop=True)
 
     if _detect_grid(df):
@@ -168,3 +158,17 @@ def parse_excel(file) -> list[dict]:
                 raw[field] = val
         rows.append(raw)
     return rows
+
+
+def parse_excel(file) -> list[dict]:
+    """
+    Main entry point.
+    Returns a list of normalised dicts ready for the mapping service.
+    Raises ValueError if the file structure is unreadable.
+    """
+    try:
+        df = pd.read_excel(file, sheet_name=0, dtype=object, engine="openpyxl")
+    except Exception as exc:
+        raise ValueError(f"Cannot read Excel file: {exc}") from exc
+
+    return normalise_dataframe(df)

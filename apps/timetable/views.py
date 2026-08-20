@@ -54,14 +54,23 @@ class TimetableUploadView(APIView):
             return Response({"detail": "No file provided."}, status=400)
 
         ext = file.name.rsplit(".", 1)[-1].lower()
-        if ext not in ("xlsx", "xls", "csv"):
-            return Response({"detail": "Only .xlsx, .xls, or .csv files are accepted."}, status=400)
+        if ext not in ("xlsx", "xls", "csv", "pdf", "docx"):
+            return Response(
+                {"detail": "Only .xlsx, .xls, .csv, .pdf, or .docx files are accepted."},
+                status=400,
+            )
 
         upload = TimetableUpload.objects.create(
             uploaded_by=request.user,
             uploaded_file=file,
         )
-        upload = process_upload(upload)
+        try:
+            upload = process_upload(upload)
+        except ImportError:
+            return Response(
+                {"detail": "PDF support is not installed on the server."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         return Response(TimetableUploadSerializer(upload).data, status=status.HTTP_201_CREATED)
 
 
