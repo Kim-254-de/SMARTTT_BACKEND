@@ -1,23 +1,22 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from .views import (
-    AcademicTermViewSet, AcademicTermSetCurrentView, TimetableSlotListView,
-    TimetableSlotsClearView, TimetableUploadDeleteView, TimetableUploadDetailView,
-    TimetableUploadListView, TimetableUploadView, UnitViewSet, AssignLecturersView,
+from apps.units.views import UnitViewSet
+from apps.timetable.views.timetable_viewsets import (
+    AcademicTermViewSet,
+    TimetableUploadAPIView,
+    TimetableUploadListViewSet,
 )
+from apps.timetable.views.viewsets import RoomViewSet, TimeSlotViewSet, TimetableSessionViewSet
 
 router = DefaultRouter()
 router.register("terms", AcademicTermViewSet, basename="term")
 router.register("units", UnitViewSet, basename="unit")
+router.register("rooms", RoomViewSet, basename="room")
+router.register("time-slots", TimeSlotViewSet, basename="time-slot")
+router.register("sessions", TimetableSessionViewSet, basename="session")
 
 urlpatterns = [
     path("", include(router.urls)),
-    path("slots/", TimetableSlotListView.as_view(), name="timetable-slots"),
-    path("upload/", TimetableUploadView.as_view(), name="timetable-upload"),
-    path("upload/list/", TimetableUploadListView.as_view(), name="timetable-upload-list"),
-    path("upload/<uuid:pk>/", TimetableUploadDetailView.as_view(), name="timetable-upload-detail"),
-    path("upload/<uuid:pk>/delete/", TimetableUploadDeleteView.as_view(), name="timetable-upload-delete"),
-    path("terms/<uuid:pk>/set-current/", AcademicTermSetCurrentView.as_view(), name="term-set-current"),
-    path("terms/<uuid:pk>/clear-slots/", TimetableSlotsClearView.as_view(), name="term-clear-slots"),
-    path("assign-lecturers/", AssignLecturersView.as_view(), name="assign-lecturers"),
+    path("upload/", TimetableUploadAPIView.as_view(), name="timetable-upload"),
+    path("upload/list/", TimetableUploadListViewSet.as_view({"get": "list"}), name="timetable-upload-list"),
 ]
