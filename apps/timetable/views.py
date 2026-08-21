@@ -126,3 +126,134 @@ class TimetableSlotsClearView(APIView):
 
         deleted_count, _ = TimetableSlot.objects.filter(term=term).delete()
         return Response({"detail": f"Deleted {deleted_count} slot(s) for {term}."})
+        
+"""
+POST /api/v1/timetable/assign-lecturers/
+
+Admin uploads the department allocation DOCX.
+For each row:
+  1. Find Unit by normalised unit_code
+  2. Find or create Lecturer record by phone/name
+  3. Update all TimetableSlot records for that unit in current term
+  4. Add lecturer_name_text so students see name even before lecturer registers
+
+Also adds lecturer_name_text field to TimetableSlot (migration needed).
+"""
+import os
+import re
+import tempfile
+
+from rest_framework.parsers import MultiPartParser
+from rest_framework.permissions import IsAdminUser
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from apps.timetable.models import AcademicTerm, TimetableSlot, Unit
+
+
+def _normalise_code(code: str) -> str:
+    return re.sub(r'\s+', '', code.upper().strip())
+
+
+class AssignLecturersView(APIView):
+    """
+    POST /api/v1/timetable/assign-lecturers/
+    Upload the department allocation DOCX to map lecturers to units.
+    Accepts: .docx files only.
+    """
+    permission_classes = [IsAdminUser]
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        file = request.FILES.get("file")
+        if not file:
+            return Response({"detail": "No file provided."}, status=400)
+
+        ext = file.name.rsplit(".", 1)[-1].lower()
+        if ext != "docx":
+            return Response({"detail": "Only .docx files are accepted."}, status=400)
+
+        # Save to temp file so python-docx can open it
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+            for chunk in file.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
+
+        try:
+            from apps.timetable.services.allocation_parser import parse_allocation_docx
+            rows = parse_allocation_docx(tmp_path)
+        except Exception as exc:
+            os.unlink(tmp_path)
+            return Response({"detail": f"Could not parse file: {exc}"}, status=400)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+        if not rows:
+            return Response({"detail": "No unit-lecturer mappings found in document."}, status=400)
+
+        term = AcademicTerm.objects.filter(is_current=True).first()
+        if not term:
+            return Response({"detail": "No current academic term set."}, status=400)
+
+        # Build lookup: normalised_code → Unit
+        all_units = {_normalise_code(u.code): u for u in Unit.objects.all()}
+
+        matched = []
+        unmatched = []
+        slots_updated = 0
+
+        for row in rows:
+            norm_code = row["unit_code"]
+            unit = all_units.get(norm_code)
+
+            if not unit:
+                unmatched.append({
+                    "unit_code": row["unit_code_raw"],
+                    "lecturer": row["lecturer_name"],
+                    "reason": "Unit not found in master timetable",
+                })
+                continue
+
+            # Try to find existing Lecturer profile by phone
+            from apps.core.models import Lecturer
+            from apps.accounts.models import User
+
+            lecturer_profile = None
+
+            # Match by phone number on User account
+            phone = row["phone"]
+            if phone:
+                user = User.objects.filter(phone_number=phone).first()
+                if user:
+                    lecturer_profile, _ = Lecturer.objects.get_or_create(
+                        user=user,
+                        defaults={"department": unit.department, "title": ""},
+                    )
+
+            # Update TimetableSlots for this unit in current term
+            slots = TimetableSlot.objects.filter(term=term, unit=unit)
+            update_count = slots.update(
+                lecturer=lecturer_profile,
+                lecturer_name_text=row["lecturer_name"],
+            )
+            slots_updated += update_count
+
+            matched.append({
+                "unit_code": row["unit_code_raw"],
+                "lecturer": row["lecturer_name"],
+                "phone": row["phone"],
+                "slots_updated": update_count,
+                "account_linked": lecturer_profile is not None,
+            })
+
+        return Response({
+            "detail": f"Processed {len(rows)} allocation rows.",
+            "matched": len(matched),
+            "unmatched": len(unmatched),
+            "slots_updated": slots_updated,
+            "results": matched,
+            "not_found": unmatched,
+        })

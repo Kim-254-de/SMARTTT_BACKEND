@@ -409,22 +409,6 @@ class StaffIDListView(APIView):
 
 
 class LecturerProfileView(APIView):
-    """
-    GET /api/v1/auth/lecturer/profile/
-    
-    Returns the lecturer's assigned slots for the current term.
-    
-    Matching priority:
-      1. Slots where lecturer FK = this lecturer's profile (ideal — requires
-         lecturers to be linked during timetable upload)
-      2. Fallback: ALL units for the current term — lecturer self-selects
-         which units they teach. This handles the common case where the
-         Excel timetable has no lecturer assignments filled in.
-    
-    The response includes a "slot_source" field:
-      "assigned"  — slots matched to this lecturer directly
-      "all_units" — fallback, lecturer must self-identify their units
-    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -441,7 +425,7 @@ class LecturerProfileView(APIView):
         slot_source = "none"
 
         if term:
-            # ── Priority 1: slots directly assigned to this lecturer ──────────
+            # ── Priority 1: slots directly assigned via lecturer FK ───────────
             try:
                 lecturer_profile = Lecturer.objects.get(user=user)
                 assigned_slots = TimetableSlot.objects.select_related(
@@ -454,13 +438,41 @@ class LecturerProfileView(APIView):
             except Lecturer.DoesNotExist:
                 pass
 
-            # ── Priority 2: fallback — return all units this term ─────────────
+            # ── Priority 2: match by lecturer_name_text from allocation sheet ─
             if not slots:
-                all_slots = TimetableSlot.objects.select_related(
+                full_name = user.get_full_name().strip()
+                first_name = user.first_name.strip()
+                last_name = user.last_name.strip()
+
+                from django.db.models import Q
+                name_matched_slots = TimetableSlot.objects.select_related(
                     "unit", "program", "room", "term"
-                ).filter(term=term).order_by("day", "start_time")
-                slots = TimetableSlotSerializer(all_slots, many=True).data
-                slot_source = "all_units"
+                ).filter(
+                    term=term,
+                    lecturer_name_text__isnull=False,
+                ).filter(
+                    Q(lecturer_name_text__icontains=full_name) |
+                    Q(lecturer_name_text__icontains=last_name) |
+                    Q(lecturer_name_text__icontains=first_name)
+                ).exclude(lecturer_name_text='')
+
+                if name_matched_slots.exists():
+                    slots = TimetableSlotSerializer(name_matched_slots, many=True).data
+                    slot_source = "name_matched"
+
+                    # Auto-link the lecturer FK now that we found a match
+                    try:
+                        lecturer_profile = Lecturer.objects.get(user=user)
+                    except Lecturer.DoesNotExist:
+                        dept = name_matched_slots.first().unit.department
+                        lecturer_profile = Lecturer.objects.create(
+                            user=user, department=dept, title=""
+                        )
+                    name_matched_slots.update(lecturer=lecturer_profile)
+
+            # ── Priority 3: no match found ─────────────────────────────────────
+            if not slots:
+                slot_source = "no_match"
 
         return Response({
             "user": UserSerializer(user).data,

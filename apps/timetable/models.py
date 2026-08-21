@@ -56,6 +56,7 @@ class TimetableSlot(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     term = models.ForeignKey(AcademicTerm, on_delete=models.PROTECT, related_name="slots")
     unit = models.ForeignKey(Unit, on_delete=models.PROTECT, related_name="slots")
+    lecturer_name_text = models.CharField(max_length=255, blank=True)
     program = models.ForeignKey(
         "core.Program", on_delete=models.PROTECT, related_name="timetable_slots"
     )

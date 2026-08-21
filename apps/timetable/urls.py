@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AcademicTermViewSet, AcademicTermSetCurrentView, TimetableSlotListView,
     TimetableSlotsClearView, TimetableUploadDeleteView, TimetableUploadDetailView,
-    TimetableUploadListView, TimetableUploadView, UnitViewSet,
+    TimetableUploadListView, TimetableUploadView, UnitViewSet, AssignLecturersView,
 )
 
 router = DefaultRouter()
@@ -19,4 +19,5 @@ urlpatterns = [
     path("upload/<uuid:pk>/delete/", TimetableUploadDeleteView.as_view(), name="timetable-upload-delete"),
     path("terms/<uuid:pk>/set-current/", AcademicTermSetCurrentView.as_view(), name="term-set-current"),
     path("terms/<uuid:pk>/clear-slots/", TimetableSlotsClearView.as_view(), name="term-clear-slots"),
+    path("assign-lecturers/", AssignLecturersView.as_view(), name="assign-lecturers"),
 ]
