@@ -13,6 +13,6 @@ class CustomUserAdmin(UserAdmin):
 
 @admin.register(PasswordResetToken)
 class PasswordResetTokenAdmin(admin.ModelAdmin):
-    list_display = ["user", "expires_at", "used_at", "created_at"]
+    list_display = ["user", "expires_at", "is_used", "created_at"]
     search_fields = ["user__email", "token"]
-    list_filter = ["used_at", "created_at"]
+    list_filter = ["is_used", "created_at"]

@@ -4,7 +4,6 @@ import secrets
 
 from django.conf import settings
 from django.contrib.auth import authenticate
-from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
 from rest_framework import status
@@ -14,12 +13,15 @@ from rest_framework.parsers import MultiPartParser
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 import requests
+import resend
 
 from apps.accounts.models import PasswordResetToken, User
 from apps.departments.models import Department, Faculty
 from apps.programs.models.program import Program
 from apps.students.models.student import Student
 from apps.timetable.models import AcademicTerm
+
+resend.api_key = settings.RESEND_API_KEY
 
 def get_tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
@@ -249,28 +251,40 @@ class PasswordResetRequestView(APIView):
         if user is None:
             return Response({'detail': 'If that email exists, a reset link has been sent.'})
 
+        PasswordResetToken.objects.filter(user=user, is_used=False).update(is_used=True)
+
         token = secrets.token_urlsafe(32)
         while PasswordResetToken.objects.filter(token=token).exists():
             token = secrets.token_urlsafe(32)
 
-        expires_at = timezone.now() + timedelta(minutes=30)
+        expires_at = timezone.now() + timedelta(minutes=15)
         PasswordResetToken.objects.create(user=user, token=token, expires_at=expires_at)
 
-        reset_base = getattr(settings, 'FRONTEND_RESET_PASSWORD_URL', 'http://localhost:8080/reset-password')
-        separator = '&' if '?' in reset_base else '?'
-        reset_url = f'{reset_base}{separator}token={token}'
+        reset_url = f'https://nextup.co.ke/reset-password.html?token={token}'
 
-        send_mail(
-            subject='Reset your SMARTTT password',
-            message=(
-                f'Hello {user.get_full_name() or user.email},\n\n'
-                f'Use this link to reset your password:\n{reset_url}\n\n'
-                f'This link expires in 30 minutes. If you did not request a reset, you can ignore this email.'
-            ),
-            from_email=getattr(settings, 'DEFAULT_FROM_EMAIL', None),
-            recipient_list=[user.email],
-            fail_silently=False,
-        )
+        try:
+            resend.Emails.send({
+                'from': settings.DEFAULT_FROM_EMAIL,
+                'to': [user.email],
+                'subject': 'Reset your NextUp password',
+                'html': f'''
+                    <div style="margin:0;background:#f5f7fb;padding:40px 16px;font-family:Arial,sans-serif;color:#172033;">
+                      <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e9f2;border-radius:16px;padding:40px;">
+                        <h1 style="margin:0 0 20px;font-size:26px;color:#172033;">Reset your password</h1>
+                        <p style="margin:0 0 16px;font-size:16px;line-height:1.6;">Hello {user.get_full_name() or user.email},</p>
+                        <p style="margin:0 0 28px;font-size:16px;line-height:1.6;">We received a request to set a new password for your NextUp account.</p>
+                        <p style="margin:0 0 28px;"><a href="{reset_url}" style="display:inline-block;background:#2563eb;color:#ffffff;padding:14px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Set New Password</a></p>
+                        <p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#526078;">This link expires strictly in 15 minutes.</p>
+                        <p style="margin:0;font-size:14px;line-height:1.6;color:#526078;">If you did not request this reset, you can safely ignore this email.</p>
+                      </div>
+                    </div>
+                ''',
+            })
+        except Exception:
+            return Response(
+                {'detail': 'Unable to send password reset email.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         return Response({'detail': 'If that email exists, a reset link has been sent.'})
 
@@ -294,7 +308,7 @@ class PasswordResetConfirmView(APIView):
 
         reset_token = PasswordResetToken.objects.select_related('user').filter(
             token=token,
-            used_at__isnull=True,
+            is_used=False,
             expires_at__gt=timezone.now(),
         ).first()
 
@@ -305,8 +319,8 @@ class PasswordResetConfirmView(APIView):
         user.set_password(new_password)
         user.save(update_fields=['password'])
 
-        reset_token.used_at = timezone.now()
-        reset_token.save(update_fields=['used_at'])
+        reset_token.is_used = True
+        reset_token.save(update_fields=['is_used'])
 
         return Response({'detail': 'Password updated successfully.'})
 

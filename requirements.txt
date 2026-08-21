@@ -14,3 +14,4 @@ beautifulsoup4==4.13.4
 Pillow==11.2.1
 gunicorn==26.0.0
 google-auth==2.40.3
+resend
