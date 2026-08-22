@@ -26,7 +26,7 @@ class SendNotificationSerializer(serializers.Serializer):
 
 
 class NotificationSerializer(serializers.ModelSerializer):
-    sent_by_name = serializers.CharField(source="sent_by.get_full_name", read_only=True)
+    sent_by_name = serializers.SerializerMethodField()
     target_program_name = serializers.CharField(
         source="target_program.name", read_only=True, default=None
     )
@@ -39,6 +39,9 @@ class NotificationSerializer(serializers.ModelSerializer):
             "target_year", "recipients_count", "sent_by",
             "sent_by_name", "sent_at",
         ]
+
+    def get_sent_by_name(self, obj):
+        return obj.sent_by.get_full_name() if obj.sent_by else "SMARTTT"
 
 
 class StudentNotificationSerializer(serializers.ModelSerializer):
