@@ -409,7 +409,9 @@ class LecturerRegisterView(APIView):
         if len(password) < 6:
             return Response({"detail": "Password must be at least 6 characters."}, status=400)
 
-        from apps.core.models import ValidStaffID, Department, Lecturer
+        from apps.accounts.models import ValidStaffID
+        from apps.departments.models import Department
+        from apps.lecturers.models import Lecturer
 
         try:
             valid_staff = ValidStaffID.objects.get(staff_id__iexact=staff_id)
@@ -457,7 +459,7 @@ class StaffIDUploadView(APIView):
         import csv
         import io
 
-        from apps.core.models import ValidStaffID
+        from apps.accounts.models import ValidStaffID
 
         file = request.FILES.get("file")
         if not file:
@@ -490,7 +492,7 @@ class StaffIDListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        from apps.core.models import ValidStaffID
+        from apps.accounts.models import ValidStaffID
 
         ids = ValidStaffID.objects.all().values("staff_id", "name_hint", "is_claimed", "uploaded_at")
         return Response(list(ids))
@@ -502,7 +504,7 @@ class LecturerProfileView(APIView):
     def get(self, request):
         from apps.timetable.models import AcademicTerm, TimetableSlot
         from apps.timetable.serializers import TimetableSlotSerializer
-        from apps.core.models import Lecturer
+        from apps.lecturers.models import Lecturer
 
         user = request.user
         if user.role not in ["lecturer"]:
@@ -536,7 +538,7 @@ class LecturerStudentsView(APIView):
     def get(self, request):
         from apps.timetable.models import AcademicTerm
         from apps.courses.models import StudentUnit
-        from apps.core.models import Lecturer
+        from apps.lecturers.models import Lecturer
 
         user = request.user
         if user.role not in ["lecturer"]:

@@ -8,6 +8,6 @@ class AcademicTermAdmin(admin.ModelAdmin):
 
 @admin.register(TimetableSlot)
 class TimetableSlotAdmin(admin.ModelAdmin):
-    list_display = ["unit", "program", "year_of_study", "day", "start_time", "end_time", "room", "term"]
-    list_filter = ["term", "day", "program"]
+    list_display = ["unit", "program", "year_of_study", "day_of_week", "start_time", "end_time", "room", "term"]
+    list_filter = ["term", "day_of_week", "program"]
     search_fields = ["unit__code", "unit__name"]
