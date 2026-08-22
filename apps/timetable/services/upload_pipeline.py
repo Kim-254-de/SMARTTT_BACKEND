@@ -3,7 +3,7 @@ from django.db import transaction
 
 from apps.timetable.models import TimetableUploadBatch
 from apps.timetable.services.conflict_detector import TimetableConflictDetectionService
-from apps.timetable.services.excel_parser import TimetableExcelParserService
+#from apps.timetable.services.excel_parser import TimetableExcelParserService
 from apps.timetable.services.persistence import TimetablePersistenceService
 from apps.timetable.services.transformer import TimetableTransformService
 from apps.timetable.validators import (
