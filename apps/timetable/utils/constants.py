@@ -16,12 +16,14 @@ REQUIRED_TIMETABLE_COLUMNS = {
     "start_time",
     "end_time",
     "room_code",
-    "lecturer_university_id",
     "class_group",
 }
 
-# Optional columns (can be missing)
+# Optional columns (can be missing) — lecturer_university_id is optional because
+# a timetable slot can be created before a lecturer is assigned; lecturer
+# assignment happens later via the separate lecturer allocation upload.
 OPTIONAL_TIMETABLE_COLUMNS = {
+    "lecturer_university_id",
     "notes",
     "venue_name",
     "session_type",
@@ -41,7 +43,7 @@ VALID_DAYS = {
 }
 
 # Supported file extensions for upload
-SUPPORTED_FILE_EXTENSIONS = {".xlsx", ".xls"}
+SUPPORTED_FILE_EXTENSIONS = {".xlsx", ".xls", ".csv", ".pdf", ".docx"}
 
 # Maximum file size: 10MB
 MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024

@@ -2,18 +2,23 @@
 Parse an Excel/CSV timetable uploaded by admin.
 
 Expected flat columns (case-insensitive, spaces/underscores interchangeable):
-  unit_code | unit_name | program | year_of_study | day | start_time | end_time
-  | room | lecturer | academic_year | semester
+  unit_code | unit_name | program_code | year_of_study | day_of_week | start_time
+  | end_time | room_code | lecturer_university_id | academic_year | semester | class_group
+
+lecturer_university_id and class_group are optional — a slot can be created
+without a lecturer assigned yet (it's filled in later via the lecturer
+allocation upload).
 
 Also handles 2-D grid format where rows = cohorts and columns = day/time slots.
-Cell content is either "UNIT CODE" or "UNIT CODE\nROOM CODE".
+Cell content is either "UNIT CODE" or "UNIT CODE\nROOM CODE". Grid format never
+carries a lecturer — that always comes from the allocation upload.
 """
 from __future__ import annotations
 
 import re
 import pandas as pd
 
-REQUIRED_FLAT_COLS = {"unit_code", "day", "start_time", "end_time"}
+REQUIRED_FLAT_COLS = {"unit_code", "day_of_week", "start_time", "end_time"}
 
 DAY_MAP = {
     "mon": "MON", "monday": "MON",
@@ -115,15 +120,16 @@ def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
             flat_rows.append({
                 "unit_code": unit_code.strip(),
                 "unit_name": unit_code.strip(),
-                "program": program_name,
+                "program_code": program_name,
                 "year_of_study": study_year,
                 "semester": row_sem,
                 "academic_year": academic_year,
-                "day": slot["day"],
+                "day_of_week": slot["day"],
                 "start_time": slot["start_time"],
                 "end_time": slot["end_time"],
-                "room": room_code,
-                "lecturer": "",
+                "room_code": room_code,
+                "lecturer_university_id": "",
+                "class_group": "MAIN",
             })
     return pd.DataFrame(flat_rows)
 
@@ -144,8 +150,8 @@ def normalise_dataframe(df: pd.DataFrame) -> list[dict]:
         raw = {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
 
         # normalise day
-        day_raw = str(raw.get("day", "")).strip().lower()[:3]
-        raw["day"] = DAY_MAP.get(day_raw, day_raw.upper())
+        day_raw = str(raw.get("day_of_week", "")).strip().lower()[:3]
+        raw["day_of_week"] = DAY_MAP.get(day_raw, day_raw.upper())
 
         # normalise times — accept "08:00", "8", "8-10" etc.
         for field in ("start_time", "end_time"):
@@ -162,7 +168,7 @@ def normalise_dataframe(df: pd.DataFrame) -> list[dict]:
 
 def parse_excel(file) -> list[dict]:
     """
-    Main entry point.
+    Main entry point for .xlsx/.xls files.
     Returns a list of normalised dicts ready for the mapping service.
     Raises ValueError if the file structure is unreadable.
     """
@@ -170,5 +176,15 @@ def parse_excel(file) -> list[dict]:
         df = pd.read_excel(file, sheet_name=0, dtype=object, engine="openpyxl")
     except Exception as exc:
         raise ValueError(f"Cannot read Excel file: {exc}") from exc
+
+    return normalise_dataframe(df)
+
+
+def parse_csv(file) -> list[dict]:
+    """Main entry point for .csv files. Same normalisation as parse_excel."""
+    try:
+        df = pd.read_csv(file, dtype=object)
+    except Exception as exc:
+        raise ValueError(f"Cannot read CSV file: {exc}") from exc
 
     return normalise_dataframe(df)
