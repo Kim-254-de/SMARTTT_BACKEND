@@ -10,11 +10,11 @@ services:
       - key: DJANGO_SECRET_KEY
         generateValue: true
       - key: DJANGO_ALLOWED_HOSTS
-        value: smarttt-backend.onrender.com
+        value: nextup.co.ke,www.nextup.co.ke
       - key: CORS_ALLOWED_ORIGINS
         value: https://smart-timetable-8f116.web.app
       - key: CSRF_TRUSTED_ORIGINS
-        value: https://smarttt-backend.onrender.com
+        value: https://nextup.co.ke,https://www.nextup.co.ke
       - key: DATABASE_URL
         fromDatabase:
           name: smarttt-db
