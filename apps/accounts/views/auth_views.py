@@ -149,7 +149,7 @@ class RegisterView(APIView):
 
         tokens = get_tokens_for_user(user)
         return Response({
-            "token": tokens['access'],
+            "access": tokens['access'],
             "refresh": tokens['refresh'],
             "user": serialize_user(user)
         }, status=status.HTTP_201_CREATED)
@@ -167,7 +167,7 @@ class LoginView(APIView):
 
         tokens = get_tokens_for_user(user)
         return Response({
-            "token": tokens['access'],
+            "access": tokens['access'],
             "refresh": tokens['refresh'],
             "user": serialize_user(user)
         })
