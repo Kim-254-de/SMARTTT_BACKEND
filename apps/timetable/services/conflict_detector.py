@@ -113,8 +113,8 @@ class TimetableConflictDetectionService:
         if slot_a.room_id == slot_b.room_id:
             conflicts.append(TimetableConflict.Type.ROOM)
         
-        # Lecturer conflict: same lecturer
-        if slot_a.lecturer_id == slot_b.lecturer_id:
+        # Lecturer conflict: same lecturer (only if both slots actually have one assigned)
+        if slot_a.lecturer_id and slot_b.lecturer_id and slot_a.lecturer_id == slot_b.lecturer_id:
             conflicts.append(TimetableConflict.Type.LECTURER)
         
         # Program conflict: same program
@@ -146,14 +146,14 @@ class TimetableConflictDetectionService:
             "slot_a": {
                 "id": str(slot_a.id),
                 "unit": str(slot_a.unit.code),
-                "lecturer": slot_a.lecturer.user.university_id,
+                "lecturer": slot_a.lecturer.user.university_id if slot_a.lecturer else None,
                 "room": slot_a.room.code,
                 "time": f"{slot_a.start_time} - {slot_a.end_time}",
             },
             "slot_b": {
                 "id": str(slot_b.id),
                 "unit": str(slot_b.unit.code),
-                "lecturer": slot_b.lecturer.user.university_id,
+                "lecturer": slot_b.lecturer.user.university_id if slot_b.lecturer else None,
                 "room": slot_b.room.code,
                 "time": f"{slot_b.start_time} - {slot_b.end_time}",
             },

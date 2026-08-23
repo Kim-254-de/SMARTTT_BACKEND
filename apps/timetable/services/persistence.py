@@ -32,8 +32,11 @@ class TimetablePersistenceService:
         
         for idx, row in enumerate(rows, 1):
             try:
-                # Check for existence before creating
-                slot = self._get_or_create_slot(upload_batch, row)
+                # Each row gets its own savepoint so a genuine database-level
+                # error (e.g. a constraint violation) on one row can't poison
+                # the whole transaction and cascade-fail every row after it.
+                with transaction.atomic():
+                    slot = self._get_or_create_slot(upload_batch, row)
                 saved_slots.append(slot)
                 
             except DuplicateSessionException as e:
@@ -84,9 +87,14 @@ class TimetablePersistenceService:
         # Get or create Department (for program/unit assignment)
         department = Department.objects.filter(code__iexact="COMP").first()
         if not department:
+            from apps.departments.models import Faculty
+            default_faculty, _ = Faculty.objects.get_or_create(
+                code="GEN",
+                defaults={"name": "General"}
+            )
             department, _ = Department.objects.get_or_create(
                 code="COMP",
-                defaults={"name": "School of Computing"}
+                defaults={"name": "School of Computing", "faculty": default_faculty}
             )
             
         # Get or create Program
