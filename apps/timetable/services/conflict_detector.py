@@ -33,58 +33,68 @@ class TimetableConflictDetectionService:
         """
         Detect conflicts in timetable slots.
         
+        Slots are bucketed by (term_id, day_of_week) before comparing pairs,
+        since conflicts can only occur within the same term and day - this
+        avoids comparing every slot against every other slot in the whole
+        batch, which scales quadratically and becomes very slow on large
+        uploads (hundreds of rows).
+        
         Args:
             slots: List of TimetableSlot instances to check
             
         Returns:
             List of detected TimetableConflict instances
         """
-        conflicts = []
         conflict_details = {}
-        
-        for i, current_slot in enumerate(slots):
-            for candidate_slot in slots[i + 1:]:
-                # Conflicts only occur in same term and day
-                if current_slot.term_id != candidate_slot.term_id:
-                    continue
-                if current_slot.day_of_week != candidate_slot.day_of_week:
-                    continue
-                
-                # Check if times overlap
-                if not self._check_time_overlap(current_slot, candidate_slot):
-                    continue
-                
-                # Determine conflict type(s)
-                conflict_types = self._determine_conflict_types(current_slot, candidate_slot)
-                
-                for conflict_type in conflict_types:
-                    # Create conflict record
-                    conflict = TimetableConflict.objects.create(
-                        conflict_type=conflict_type,
-                        term=current_slot.term,
-                        slot_a=current_slot,
-                        slot_b=candidate_slot,
-                        details=self._generate_conflict_details(
-                            current_slot,
-                            candidate_slot,
-                            conflict_type
-                        ),
-                    )
-                    conflicts.append(conflict)
-                    
-                    # Log conflict detection
-                    self.logger.log_conflict_detected(
-                        upload_batch_id=current_slot.upload_batch_id or "unknown",
-                        conflict_type=conflict_type,
-                        slot_a_id=current_slot.id,
-                        slot_b_id=candidate_slot.id,
-                    )
-                    
-                    # Track for statistics
-                    if conflict_type not in conflict_details:
-                        conflict_details[conflict_type] = 0
-                    conflict_details[conflict_type] += 1
-        
+        pending = []  # list of (conflict_type, current_slot, candidate_slot)
+
+        buckets: Dict[tuple, List[TimetableSlot]] = {}
+        for slot in slots:
+            key = (slot.term_id, slot.day_of_week)
+            buckets.setdefault(key, []).append(slot)
+
+        for bucket_slots in buckets.values():
+            for i, current_slot in enumerate(bucket_slots):
+                for candidate_slot in bucket_slots[i + 1:]:
+                    if not self._check_time_overlap(current_slot, candidate_slot):
+                        continue
+
+                    conflict_types = self._determine_conflict_types(current_slot, candidate_slot)
+                    for conflict_type in conflict_types:
+                        pending.append((conflict_type, current_slot, candidate_slot))
+                        if conflict_type not in conflict_details:
+                            conflict_details[conflict_type] = 0
+                        conflict_details[conflict_type] += 1
+
+        if not pending:
+            return []
+
+        # Build all conflict objects in memory, then a single bulk_create
+        # instead of one INSERT per conflict (can be thousands on a large
+        # upload with genuine overlaps).
+        to_create = [
+            TimetableConflict(
+                conflict_type=conflict_type,
+                term=current_slot.term,
+                slot_a=current_slot,
+                slot_b=candidate_slot,
+                details=self._generate_conflict_details(current_slot, candidate_slot, conflict_type),
+            )
+            for conflict_type, current_slot, candidate_slot in pending
+        ]
+        conflicts = TimetableConflict.objects.bulk_create(to_create)
+
+        # Log each conflict (kept per-conflict for compatibility with
+        # existing log consumers, but the expensive part - the INSERT -
+        # is now a single bulk_create above, not one per conflict).
+        for conflict_type, current_slot, candidate_slot in pending:
+            self.logger.log_conflict_detected(
+                upload_batch_id=current_slot.upload_batch_id or "unknown",
+                conflict_type=conflict_type,
+                slot_a_id=current_slot.id,
+                slot_b_id=candidate_slot.id,
+            )
+
         return conflicts
     
     @staticmethod

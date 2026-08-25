@@ -143,7 +143,7 @@ class TimetableUploadValidator:
         
         # Validate string fields length and format
         program_code = str(row.get("program_code", "")).strip()
-        if not program_code or len(program_code) > 20:
+        if not program_code or len(program_code) > 64:
             errors.append(f"Row {row_number}: Invalid program_code '{program_code}'")
         
         unit_code = str(row.get("unit_code", "")).strip()
