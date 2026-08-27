@@ -2,28 +2,52 @@
 
 ## Authentication
 
-All endpoints require JWT authentication unless noted otherwise.
+All endpoints require Django session authentication unless noted otherwise.
 
-The backend exposes two login paths:
+### Login Process
 
-- `POST /api/v1/auth/token/` uses SimpleJWT and returns `access` and `refresh`.
-- `POST /api/v1/accounts/auth/login/` uses the custom accounts login view and returns `token`, `refresh`, and `user`.
+1. **Register** (if new user):
+   ```bash
+   POST /api/v1/accounts/auth/register/
+   Content-Type: application/json
 
+   {
+     "email": "user@example.com",
+     "password": "password",
+     "full_name": "Full Name",
+     "admission_number": "ADM001"
+   }
+   ```
+
+2. **Login**:
+   ```bash
+   POST /api/v1/accounts/auth/login/
+   Content-Type: application/json
+
+   {
+     "email": "user@example.com",
+     "password": "password"
+   }
+   ```
+   This returns a session cookie which is automatically stored by your client.
+
+3. **Access Authenticated Endpoints**:
+   ```bash
+   GET /api/v1/students/
+   # Session cookie is automatically sent with requests
+   ```
+
+4. **Logout**:
+   ```bash
+   POST /api/v1/accounts/auth/logout/
+   ```
+
+### CSRF Token Handling
+
+For state-changing requests (POST, PATCH, DELETE), include CSRF token:
 ```bash
-# Obtain token
-curl -X POST http://localhost:8000/api/v1/auth/token/ \
-  -H "Content-Type: application/json" \
-  -d '{"username":"user@example.com","password":"password"}'
-
-# Response
-{
-  "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
-  "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
-}
-
-# Use in requests
-curl -H "Authorization: Bearer <access_token>" \
-  http://localhost:8000/api/students/
+# Get CSRF token from cookies or response headers
+X-CSRFToken: <csrf_token>
 ```
 
 ## Base URL

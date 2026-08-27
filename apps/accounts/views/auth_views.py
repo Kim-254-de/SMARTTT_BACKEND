@@ -23,12 +23,7 @@ from apps.timetable.models import AcademicTerm
 
 resend.api_key = settings.RESEND_API_KEY
 
-def get_tokens_for_user(user):
-    refresh = RefreshToken.for_user(user)
-    return {
-        'refresh': str(refresh),
-        'access': str(refresh.access_token),
-    }
+# Using Django sessions instead of issuing JWTs; login the user to create a session
 
 def serialize_user(user):
     student = getattr(user, 'student_profile', None)
@@ -565,3 +560,10 @@ class PasswordResetView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
         return Response({"detail": "Password reset email sent."})
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        logout(request)
+        return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)
