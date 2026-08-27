@@ -32,8 +32,11 @@ class TimetablePersistenceService:
         
         for idx, row in enumerate(rows, 1):
             try:
-                # Check for existence before creating
-                slot = self._get_or_create_slot(upload_batch, row)
+                # Each row gets its own savepoint so a genuine database-level
+                # error (e.g. a constraint violation) on one row can't poison
+                # the whole transaction and cascade-fail every row after it.
+                with transaction.atomic():
+                    slot = self._get_or_create_slot(upload_batch, row)
                 saved_slots.append(slot)
                 
             except DuplicateSessionException as e:
@@ -63,11 +66,6 @@ class TimetablePersistenceService:
                     upload_batch.id
                 )
         
-        if not saved_slots and errors:
-            raise DatabaseOperationException(
-                f"Failed to save any timetable slots. Errors: {len(errors)}"
-            )
-        
         return saved_slots, errors
     
     def _get_or_create_slot(
@@ -89,9 +87,14 @@ class TimetablePersistenceService:
         # Get or create Department (for program/unit assignment)
         department = Department.objects.filter(code__iexact="COMP").first()
         if not department:
+            from apps.departments.models import Faculty
+            default_faculty, _ = Faculty.objects.get_or_create(
+                code="GEN",
+                defaults={"name": "General"}
+            )
             department, _ = Department.objects.get_or_create(
                 code="COMP",
-                defaults={"name": "School of Computing"}
+                defaults={"name": "School of Computing", "faculty": default_faculty}
             )
             
         # Get or create Program
@@ -125,15 +128,19 @@ class TimetablePersistenceService:
                 f"Room not found: {row['room_code']}"
             )
         
-        # Get Lecturer
-        try:
-            lecturer = Lecturer.objects.select_related("user").get(
-                user__university_id=row["lecturer_university_id"]
-            )
-        except Lecturer.DoesNotExist:
-            raise ResourceNotFoundException(
-                f"Lecturer not found: {row['lecturer_university_id']}"
-            )
+        # Get Lecturer (optional — a slot can exist before a lecturer is
+        # assigned; assignment happens later via the allocation upload)
+        lecturer_university_id = str(row.get("lecturer_university_id") or "").strip()
+        lecturer = None
+        if lecturer_university_id:
+            try:
+                lecturer = Lecturer.objects.select_related("user").get(
+                    user__university_id=lecturer_university_id
+                )
+            except Lecturer.DoesNotExist:
+                raise ResourceNotFoundException(
+                    f"Lecturer not found: {lecturer_university_id}"
+                )
         
         # Check for duplicate
         existing = TimetableSlot.objects.filter(

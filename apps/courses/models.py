@@ -13,7 +13,7 @@ class StudentUnit(models.Model):
         "accounts.User", on_delete=models.CASCADE, related_name="student_units"
     )
     unit = models.ForeignKey(
-        "timetable.Unit", on_delete=models.CASCADE, related_name="student_registrations"
+        "units.Unit", on_delete=models.CASCADE, related_name="student_registrations"
     )
     term = models.ForeignKey(
         "timetable.AcademicTerm", on_delete=models.PROTECT, related_name="student_units"

@@ -33,7 +33,6 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.analytics",
     "apps.common",
-    "apps.core",
     "apps.curriculum",
     "apps.departments",
     "apps.enrollments",

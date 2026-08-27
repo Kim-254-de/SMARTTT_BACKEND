@@ -23,12 +23,7 @@ from apps.timetable.models import AcademicTerm
 
 resend.api_key = settings.RESEND_API_KEY
 
-def get_tokens_for_user(user):
-    refresh = RefreshToken.for_user(user)
-    return {
-        'refresh': str(refresh),
-        'access': str(refresh.access_token),
-    }
+# Using Django sessions instead of issuing JWTs; login the user to create a session
 
 def serialize_user(user):
     student = getattr(user, 'student_profile', None)
@@ -149,7 +144,7 @@ class RegisterView(APIView):
 
         tokens = get_tokens_for_user(user)
         return Response({
-            "token": tokens['access'],
+            "access": tokens['access'],
             "refresh": tokens['refresh'],
             "user": serialize_user(user)
         }, status=status.HTTP_201_CREATED)
@@ -167,7 +162,7 @@ class LoginView(APIView):
 
         tokens = get_tokens_for_user(user)
         return Response({
-            "token": tokens['access'],
+            "access": tokens['access'],
             "refresh": tokens['refresh'],
             "user": serialize_user(user)
         })
@@ -409,7 +404,9 @@ class LecturerRegisterView(APIView):
         if len(password) < 6:
             return Response({"detail": "Password must be at least 6 characters."}, status=400)
 
-        from apps.core.models import ValidStaffID, Department, Lecturer
+        from apps.accounts.models import ValidStaffID
+        from apps.departments.models import Department
+        from apps.lecturers.models import Lecturer
 
         try:
             valid_staff = ValidStaffID.objects.get(staff_id__iexact=staff_id)
@@ -457,7 +454,7 @@ class StaffIDUploadView(APIView):
         import csv
         import io
 
-        from apps.core.models import ValidStaffID
+        from apps.accounts.models import ValidStaffID
 
         file = request.FILES.get("file")
         if not file:
@@ -490,7 +487,7 @@ class StaffIDListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
-        from apps.core.models import ValidStaffID
+        from apps.accounts.models import ValidStaffID
 
         ids = ValidStaffID.objects.all().values("staff_id", "name_hint", "is_claimed", "uploaded_at")
         return Response(list(ids))
@@ -502,7 +499,7 @@ class LecturerProfileView(APIView):
     def get(self, request):
         from apps.timetable.models import AcademicTerm, TimetableSlot
         from apps.timetable.serializers import TimetableSlotSerializer
-        from apps.core.models import Lecturer
+        from apps.lecturers.models import Lecturer
 
         user = request.user
         if user.role not in ["lecturer"]:
@@ -536,7 +533,7 @@ class LecturerStudentsView(APIView):
     def get(self, request):
         from apps.timetable.models import AcademicTerm
         from apps.courses.models import StudentUnit
-        from apps.core.models import Lecturer
+        from apps.lecturers.models import Lecturer
 
         user = request.user
         if user.role not in ["lecturer"]:
@@ -563,3 +560,10 @@ class PasswordResetView(APIView):
     permission_classes = [AllowAny]
     def post(self, request):
         return Response({"detail": "Password reset email sent."})
+
+class LogoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        logout(request)
+        return Response({"detail": "Successfully logged out."}, status=status.HTTP_200_OK)

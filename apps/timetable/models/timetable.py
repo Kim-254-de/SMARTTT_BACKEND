@@ -70,6 +70,8 @@ class TimetableSlot(BaseModel):
         "lecturers.Lecturer",
         on_delete=models.PROTECT,
         related_name="teaching_slots",
+        null=True,
+        blank=True,
     )
     room = models.ForeignKey(
         "rooms.Room",

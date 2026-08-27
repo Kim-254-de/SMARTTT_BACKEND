@@ -39,11 +39,61 @@ def _normalise_code(code: str) -> str:
 def _is_header_row(cells: list[str]) -> bool:
     """Detect table header rows like 'Course code', 'Course Title' etc."""
     joined = ' '.join(cells).lower()
-    return any(kw in joined for kw in ['course code', 'course title', 'lecturer'])
+    return 'course code' in joined or 'course title' in joined
 
 
 def _is_total_row(cells: list[str]) -> bool:
     return cells[0].strip().upper() == 'TOTAL'
+
+
+def _process_allocation_table_rows(table_rows: list[list[str]]) -> list[dict]:
+    """
+    Shared row-processing logic for both DOCX and PDF allocation tables.
+    Each item in table_rows is a list of cell strings for one table row.
+    """
+    results = []
+    seen = set()  # (normalised_unit_code, lecturer_name) pairs
+
+    for cells in table_rows:
+        cells = [c.strip() if c else "" for c in cells]
+        if not cells or not cells[0]:
+            continue
+        if _is_header_row(cells) or _is_total_row(cells):
+            continue
+
+        # Expect at least 6 columns: code, title, L, P, CF, lecturer
+        if len(cells) < 6:
+            continue
+
+        raw_code = cells[0].strip()
+        raw_lecturer = cells[5].strip() if len(cells) > 5 else ''
+        raw_phone = cells[6].strip() if len(cells) > 6 else ''
+
+        # Skip rows where code doesn't look like a unit code
+        if not raw_code or not re.match(r'^[A-Z]{2,6}\s*\d', raw_code, re.IGNORECASE):
+            continue
+
+        # Skip rows with no lecturer
+        if not raw_lecturer:
+            continue
+
+        unit_code_norm = _normalise_code(raw_code)
+        lecturer_name = _clean_lecturer_name(raw_lecturer)
+        phone = _clean_phone(raw_phone)
+
+        key = (unit_code_norm, lecturer_name)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        results.append({
+            "unit_code": unit_code_norm,
+            "unit_code_raw": raw_code,
+            "lecturer_name": lecturer_name,
+            "phone": phone,
+        })
+
+    return results
 
 
 def parse_allocation_docx(file_path: str) -> list[dict]:
@@ -62,47 +112,36 @@ def parse_allocation_docx(file_path: str) -> list[dict]:
         raise ImportError("python-docx is required: pip install python-docx")
 
     doc = Document(file_path)
-    results = []
-    seen = set()  # (normalised_unit_code, lecturer_name) pairs
+    table_rows = [
+        [cell.text for cell in row.cells]
+        for table in doc.tables
+        for row in table.rows
+    ]
+    return _process_allocation_table_rows(table_rows)
 
-    for table in doc.tables:
-        for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells]
-            if not cells or not cells[0]:
-                continue
-            if _is_header_row(cells) or _is_total_row(cells):
-                continue
 
-            # Expect at least 6 columns: code, title, L, P, CF, lecturer
-            if len(cells) < 6:
-                continue
+def parse_allocation_pdf(file) -> list[dict]:
+    """
+    Parse the allocation PDF (same document structure as the DOCX version,
+    extracted via table detection) and return the same row shape as
+    parse_allocation_docx.
+    """
+    try:
+        import pdfplumber
+    except ImportError:
+        raise ImportError("pdfplumber is required: pip install pdfplumber")
 
-            raw_code = cells[0].strip()
-            raw_lecturer = cells[5].strip() if len(cells) > 5 else ''
-            raw_phone = cells[6].strip() if len(cells) > 6 else ''
+    table_rows = []
+    with pdfplumber.open(file) as pdf:
+        for page in pdf.pages:
+            for table in page.extract_tables() or []:
+                for row in table:
+                    table_rows.append([cell or "" for cell in row])
 
-            # Skip rows where code doesn't look like a unit code
-            if not raw_code or not re.match(r'^[A-Z]{2,6}\s*\d', raw_code, re.IGNORECASE):
-                continue
+    if not table_rows:
+        raise ValueError(
+            "No tables could be extracted from the PDF. "
+            "Scanned/image PDFs are not supported because they have no text layer."
+        )
 
-            # Skip rows with no lecturer
-            if not raw_lecturer:
-                continue
-
-            unit_code_norm = _normalise_code(raw_code)
-            lecturer_name = _clean_lecturer_name(raw_lecturer)
-            phone = _clean_phone(raw_phone)
-
-            key = (unit_code_norm, lecturer_name)
-            if key in seen:
-                continue
-            seen.add(key)
-
-            results.append({
-                "unit_code": unit_code_norm,
-                "unit_code_raw": raw_code,
-                "lecturer_name": lecturer_name,
-                "phone": phone,
-            })
-
-    return results
+    return _process_allocation_table_rows(table_rows)

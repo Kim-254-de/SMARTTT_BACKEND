@@ -7,10 +7,15 @@ Orchestrates the full timetable upload pipeline:
 """
 from __future__ import annotations
 
+import os
+import tempfile
+
 from django.utils import timezone
 
 from apps.timetable.models import AcademicTerm, TimetableSlot, TimetableUpload
+from apps.timetable.services.docx_timetable_parser import parse_docx
 from apps.timetable.services.excel_parser import parse_excel
+from apps.timetable.services.pdf_timetable_parser import parse_pdf
 from apps.timetable.services.mapper import (
     resolve_department, resolve_lecturer, resolve_program,
     resolve_room, resolve_time, resolve_unit,
@@ -34,6 +39,31 @@ def _get_or_create_term(academic_year: str, semester: int) -> AcademicTerm:
     return term
 
 
+def _parse_uploaded_file(upload: TimetableUpload) -> list[dict]:
+    ext = os.path.splitext(upload.uploaded_file.name)[1].lower().lstrip(".")
+
+    if ext in ("xlsx", "xls", "csv"):
+        return parse_excel(upload.uploaded_file)
+    if ext == "pdf":
+        return parse_pdf(upload.uploaded_file)
+    if ext == "docx":
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+                for chunk in upload.uploaded_file.chunks():
+                    tmp.write(chunk)
+                tmp_path = tmp.name
+            return parse_docx(tmp_path)
+        finally:
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except FileNotFoundError:
+                    pass
+
+    raise ValueError(f"Unsupported file type: .{ext}")
+
+
 def process_upload(upload: TimetableUpload) -> TimetableUpload:
     upload.status = TimetableUpload.Status.PROCESSING
     upload.save(update_fields=["status"])
@@ -42,7 +72,7 @@ def process_upload(upload: TimetableUpload) -> TimetableUpload:
     slots_to_create = []
 
     try:
-        rows = parse_excel(upload.uploaded_file)
+        rows = _parse_uploaded_file(upload)
     except ValueError as exc:
         upload.status = TimetableUpload.Status.FAILED
         upload.errors = [{"row": 0, "error": str(exc)}]

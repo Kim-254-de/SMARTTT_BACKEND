@@ -13,9 +13,9 @@ from apps.timetable.utils import (
 
 
 class ExcelFileValidator:
-    """Validates Excel file structure and format."""
+    """Validates uploaded timetable file extension and size."""
     
-    VALID_EXTENSIONS = {".xlsx", ".xls"}
+    VALID_EXTENSIONS = {".xlsx", ".xls", ".csv", ".pdf", ".docx"}
     MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
     
     @staticmethod
@@ -25,7 +25,7 @@ class ExcelFileValidator:
         
         if ext not in ExcelFileValidator.VALID_EXTENSIONS:
             raise DRFValidationError({
-                "file": f"Only Excel files (.xlsx, .xls) are supported. Got: {ext}"
+                "file": f"Only Excel, CSV, PDF, or Word files (.xlsx, .xls, .csv, .pdf, .docx) are supported. Got: {ext}"
             })
     
     @staticmethod
@@ -49,6 +49,17 @@ class ExcelFileValidator:
 
 class TimetableUploadValidator:
     """Validates timetable Excel data structure and content."""
+    
+    @staticmethod
+    def _parse_time_string(value: str):
+        """Parse 'HH:MM' or 'HH:MM:SS' strings into a datetime.time, or None."""
+        value = value.strip()
+        for fmt in ("%H:%M", "%H:%M:%S"):
+            try:
+                return datetime.strptime(value, fmt).time()
+            except ValueError:
+                continue
+        return None
     
     @staticmethod
     def validate_columns(columns: List[str]) -> None:
@@ -75,7 +86,7 @@ class TimetableUploadValidator:
         
         # Validate academic_year format (e.g., "2023-2024" or "2023")
         academic_year = str(row.get("academic_year", "")).strip()
-        if not re.match(r"^\d{4}(-\d{4})?$", academic_year):
+        if not re.match(r"^\d{4}([-/]\d{4})?$", academic_year):
             errors.append(f"Row {row_number}: Invalid academic_year format '{academic_year}'")
         
         # Validate semester is numeric and reasonable
@@ -110,6 +121,12 @@ class TimetableUploadValidator:
             if hasattr(end_time, "time"):
                 end_time = end_time.time()
             
+            # Handle "HH:MM" / "HH:MM:SS" string times (parsers emit strings)
+            if isinstance(start_time, str):
+                start_time = TimetableUploadValidator._parse_time_string(start_time)
+            if isinstance(end_time, str):
+                end_time = TimetableUploadValidator._parse_time_string(end_time)
+            
             if not isinstance(start_time, time):
                 errors.append(f"Row {row_number}: start_time must be a valid time")
             if not isinstance(end_time, time):
@@ -138,7 +155,7 @@ class TimetableUploadValidator:
             errors.append(f"Row {row_number}: Invalid room_code '{room_code}'")
         
         lecturer_id = str(row.get("lecturer_university_id", "")).strip()
-        if not lecturer_id or len(lecturer_id) > 20:
+        if lecturer_id and len(lecturer_id) > 20:
             errors.append(f"Row {row_number}: Invalid lecturer_university_id '{lecturer_id}'")
         
         # Validate class_group (optional)

@@ -60,7 +60,7 @@ class Notification(models.Model):
     )
     target = models.CharField(max_length=20, choices=Target.choices, default=Target.ALL)
     target_program = models.ForeignKey(
-        "core.Program", on_delete=models.SET_NULL,
+        "programs.Program", on_delete=models.SET_NULL,
         null=True, blank=True, related_name="notifications",
     )
     target_year = models.PositiveSmallIntegerField(null=True, blank=True)

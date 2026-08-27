@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import User
-from apps.core.models import Program
+from apps.programs.models import Program
 from apps.courses.models import StudentUnit
 
 from .fcm_service import send_to_tokens
