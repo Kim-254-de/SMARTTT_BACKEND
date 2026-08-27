@@ -1,4 +1,4 @@
-from datetime import time
+from datetime import datetime, time
 from typing import Dict, Any, List, Tuple
 
 from apps.timetable.utils import DataValidationException, VALID_DAYS
@@ -31,7 +31,7 @@ class TimetableTransformService:
                 "start_time": start_time,
                 "end_time": end_time,
                 "room_code": str(row.get("room_code", "")).strip(),
-                "lecturer_university_id": str(row.get("lecturer_university_id", "")).strip(),
+                "lecturer_university_id": str(row.get("lecturer_university_id") or "").strip(),
                 "class_group": str(row.get("class_group", "MAIN")).strip() or "MAIN",
                 "notes": row.get("notes", ""),
                 "venue_name": row.get("venue_name", ""),
@@ -80,7 +80,7 @@ class TimetableTransformService:
             
             for fmt in formats:
                 try:
-                    parsed = time.strptime(time_str, fmt)
+                    parsed = datetime.strptime(time_str, fmt)
                     return parsed.time()
                 except ValueError:
                     continue

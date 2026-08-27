@@ -8,7 +8,10 @@ from __future__ import annotations
 import re
 from django.db.models import Q
 
-from apps.core.models import Department, Faculty, Lecturer, Program, Room
+from apps.departments.models import Department, Faculty
+from apps.lecturers.models import Lecturer
+from apps.programs.models import Program
+from apps.rooms.models import Room
 from apps.timetable.models import Unit
 
 

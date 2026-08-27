@@ -120,7 +120,11 @@ def _serialise_slot(slot: TimetableSlot) -> dict:
         "start_time": slot.start_time.strftime("%H:%M"),
         "end_time": slot.end_time.strftime("%H:%M"),
         "room": slot.room.code if slot.room else None,
-        "lecturer": slot.lecturer.user.get_full_name() if slot.lecturer else None,
+        "lecturer": (
+            slot.lecturer.user.get_full_name()
+            if slot.lecturer
+            else slot.lecturer_name_text or None  # ← add this fallback
+        ),
         "program": slot.program.name if slot.program else None,
         "year_of_study": slot.year_of_study,
     }

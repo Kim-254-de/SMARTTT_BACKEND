@@ -3,7 +3,7 @@ from django.db import transaction
 
 from apps.timetable.models import TimetableUploadBatch
 from apps.timetable.services.conflict_detector import TimetableConflictDetectionService
-from apps.timetable.services.excel_parser import TimetableExcelParserService
+from apps.timetable.services.file_dispatcher import parse_timetable_file
 from apps.timetable.services.persistence import TimetablePersistenceService
 from apps.timetable.services.transformer import TimetableTransformService
 from apps.timetable.validators import (
@@ -23,7 +23,6 @@ from apps.timetable.utils import (
 class TimetableUploadPipelineService: 
     def __init__(self):
         """Initialize pipeline with required services."""
-        self.parser_service = TimetableExcelParserService()
         self.transform_service = TimetableTransformService()
         self.persistence_service = TimetablePersistenceService()
         self.conflict_service = TimetableConflictDetectionService()
@@ -38,17 +37,18 @@ class TimetableUploadPipelineService:
                 upload_batch.source_file.name
             )
             
-            # Stage 1: Parse Excel file
-            dataframe = self.parser_service.parse(upload_batch.source_file.path)
-            rows_received = len(dataframe)
+            # Stage 1: Parse the uploaded file (xlsx/xls/csv/pdf/docx)
+            raw_rows = parse_timetable_file(upload_batch.source_file.path)
+            rows_received = len(raw_rows)
             upload_batch.rows_received = rows_received
             
             # Stage 2: Validate columns
-            TimetableUploadValidator.validate_columns(dataframe.columns)
+            if raw_rows:
+                TimetableUploadValidator.validate_columns(raw_rows[0].keys())
             
-            # Stage 3: Extract rows
+            # Stage 3: (rows already extracted by the parser)
             self.logger.log_parsing_started(upload_batch.id, rows_received)
-            raw_rows, parse_errors = self.parser_service.extract_rows(dataframe)
+            parse_errors = []
             
             # Stage 4: Validate rows
             validation_errors = []

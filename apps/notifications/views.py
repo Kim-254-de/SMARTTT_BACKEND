@@ -6,7 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.models import User
-from apps.core.models import Program
+from apps.programs.models import Program
 from apps.courses.models import StudentUnit
 
 from .fcm_service import send_to_tokens
@@ -269,3 +269,17 @@ class LecturerSendNotificationView(APIView):
             "push_sent": fcm_success,
             "push_attempted": len(tokens),
         }, status=201)
+        
+class UnregisterFCMTokenView(APIView):
+    """
+    DELETE /api/v1/notifications/unregister-token/
+    Removes the device token — student stops receiving push notifications.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request):
+        token = request.data.get("token")
+        if not token:
+            return Response({"detail": "token is required."}, status=400)
+        FCMToken.objects.filter(user=request.user, token=token).delete()
+        return Response({"detail": "Token removed."})

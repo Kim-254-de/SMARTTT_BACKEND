@@ -1,3 +1,5 @@
+from apps.units.models import Unit
+
 from .room import Room
 from .time_slot import TimeSlot
 from .timetable_session import TimetableSession
@@ -8,6 +10,7 @@ __all__ = [
     "TimeSlot",
     "TimetableSession",
     "AcademicTerm",
+    "Unit",
     "TimetableUploadBatch",
     "TimetableSlot",
     "TimetableConflict",

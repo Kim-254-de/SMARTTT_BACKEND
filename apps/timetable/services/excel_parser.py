@@ -2,18 +2,23 @@
 Parse an Excel/CSV timetable uploaded by admin.
 
 Expected flat columns (case-insensitive, spaces/underscores interchangeable):
-  unit_code | unit_name | program | year_of_study | day | start_time | end_time
-  | room | lecturer | academic_year | semester
+  unit_code | unit_name | program_code | year_of_study | day_of_week | start_time
+  | end_time | room_code | lecturer_university_id | academic_year | semester | class_group
+
+lecturer_university_id and class_group are optional — a slot can be created
+without a lecturer assigned yet (it's filled in later via the lecturer
+allocation upload).
 
 Also handles 2-D grid format where rows = cohorts and columns = day/time slots.
-Cell content is either "UNIT CODE" or "UNIT CODE\nROOM CODE".
+Cell content is either "UNIT CODE" or "UNIT CODE\nROOM CODE". Grid format never
+carries a lecturer — that always comes from the allocation upload.
 """
 from __future__ import annotations
 
 import re
 import pandas as pd
 
-REQUIRED_FLAT_COLS = {"unit_code", "day", "start_time", "end_time"}
+REQUIRED_FLAT_COLS = {"unit_code", "day_of_week", "start_time", "end_time"}
 
 DAY_MAP = {
     "mon": "MON", "monday": "MON",
@@ -52,6 +57,7 @@ def _detect_grid(df: pd.DataFrame) -> bool:
 
 def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
     """Convert 2-D grid to flat rows."""
+    # ── locate the header row ────────────────────────────────────────────────
     header_row_idx = None
     col_map: dict[int, dict] = {}
 
@@ -63,7 +69,7 @@ def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
             break
 
     if header_row_idx is None:
-        return df
+        return df  # fall back to flat
 
     current_day = "MON"
     for col_idx in range(1, len(df.columns)):
@@ -79,6 +85,7 @@ def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
                 sh, eh = int(tm.group(1)), int(tm.group(2))
                 col_map[col_idx] = {"day": current_day, "start_time": _fmt_time(sh), "end_time": _fmt_time(eh)}
 
+    # ── extract academic year / semester from top rows ───────────────────────
     academic_year, semester = "2025/2026", 1
     for idx in range(min(header_row_idx + 1, 10)):
         text = " ".join(str(x) for x in df.iloc[idx].values if pd.notna(x))
@@ -89,6 +96,7 @@ def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
         if any(t in text.lower() for t in ["semester 2", "second semester"]):
             semester = 2
 
+    # ── iterate data rows ────────────────────────────────────────────────────
     flat_rows = []
     for row_idx in range(header_row_idx + 1, len(df)):
         cohort_val = df.iloc[row_idx, 0]
@@ -112,56 +120,71 @@ def _parse_grid(df: pd.DataFrame) -> pd.DataFrame:
             flat_rows.append({
                 "unit_code": unit_code.strip(),
                 "unit_name": unit_code.strip(),
-                "program": program_name,
+                "program_code": program_name,
                 "year_of_study": study_year,
                 "semester": row_sem,
                 "academic_year": academic_year,
-                "day": slot["day"],
+                "day_of_week": slot["day"],
                 "start_time": slot["start_time"],
                 "end_time": slot["end_time"],
-                "room": room_code,
-                "lecturer": "",
+                "room_code": room_code,
+                "lecturer_university_id": "",
+                "class_group": "MAIN",
             })
     return pd.DataFrame(flat_rows)
 
 
-class TimetableExcelParserService:
-    @staticmethod
-    def parse_excel(file) -> list[dict]:
-        """
-        Main entry point.
-        Returns a list of normalised dicts ready for the mapping service.
-        Raises ValueError if the file structure is unreadable.
-        """
-        try:
-            df = pd.read_excel(file, sheet_name=0, dtype=object, engine="openpyxl")
-        except Exception as exc:
-            raise ValueError(f"Cannot read Excel file: {exc}") from exc
+def normalise_dataframe(df: pd.DataFrame) -> list[dict]:
+    df = df.dropna(how="all").reset_index(drop=True)
 
-        df = df.dropna(how="all").reset_index(drop=True)
+    if _detect_grid(df):
+        df = _parse_grid(df)
+    else:
+        df.columns = [_normalise_col(c) for c in df.columns]
+        missing = REQUIRED_FLAT_COLS - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing required columns: {missing}")
 
-        if _detect_grid(df):
-            df = _parse_grid(df)
-        else:
-            df.columns = [_normalise_col(c) for c in df.columns]
-            missing = REQUIRED_FLAT_COLS - set(df.columns)
-            if missing:
-                raise ValueError(f"Missing required columns: {missing}")
+    rows = []
+    for _, row in df.iterrows():
+        raw = {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
 
-        rows = []
-        for _, row in df.iterrows():
-            raw = {k: (None if pd.isna(v) else v) for k, v in row.to_dict().items()}
+        # normalise day
+        day_raw = str(raw.get("day_of_week", "")).strip().lower()[:3]
+        raw["day_of_week"] = DAY_MAP.get(day_raw, day_raw.upper())
 
-            # normalise day
-            day_raw = str(raw.get("day", "")).strip().lower()[:3]
-            raw["day"] = DAY_MAP.get(day_raw, day_raw.upper())
+        # normalise times — accept "08:00", "8", "8-10" etc.
+        for field in ("start_time", "end_time"):
+            val = str(raw.get(field, "")).strip()
+            # pure integer like "8"
+            if re.match(r"^\d{1,2}$", val):
+                raw[field] = _fmt_time(int(val))
+            # already HH:MM
+            elif re.match(r"^\d{1,2}:\d{2}$", val):
+                raw[field] = val
+        rows.append(raw)
+    return rows
 
-            # normalise times — accept "08:00", "8", "8-10" etc.
-            for field in ("start_time", "end_time"):
-                val = str(raw.get(field, "")).strip()
-                if re.match(r"^\d{1,2}$", val):
-                    raw[field] = _fmt_time(int(val))
-                elif re.match(r"^\d{1,2}:\d{2}$", val):
-                    raw[field] = val
-            rows.append(raw)
-        return rows
+
+def parse_excel(file) -> list[dict]:
+    """
+    Main entry point for .xlsx/.xls files.
+    Returns a list of normalised dicts ready for the mapping service.
+    Raises ValueError if the file structure is unreadable.
+    """
+    try:
+        df = pd.read_excel(file, sheet_name=0, dtype=object, engine="openpyxl")
+    except Exception as exc:
+        raise ValueError(f"Cannot read Excel file: {exc}") from exc
+
+    return normalise_dataframe(df)
+
+
+def parse_csv(file) -> list[dict]:
+    """Main entry point for .csv files. Same normalisation as parse_excel."""
+    try:
+        df = pd.read_csv(file, dtype=object)
+    except Exception as exc:
+        raise ValueError(f"Cannot read CSV file: {exc}") from exc
+
+    return normalise_dataframe(df)
