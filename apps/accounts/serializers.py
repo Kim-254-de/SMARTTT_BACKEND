@@ -7,6 +7,7 @@ class RegisterSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True, min_length=6)
     full_name = serializers.CharField()
     university_id = serializers.CharField(required=False, allow_blank=True)
+    admission_number = serializers.CharField(required=False, allow_blank=True)
 
 
 class LoginSerializer(serializers.Serializer):

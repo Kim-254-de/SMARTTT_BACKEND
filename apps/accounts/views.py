@@ -36,7 +36,7 @@ class RegisterView(APIView):
         if User.objects.filter(email=email).exists():
             return Response({"detail": "Email already registered."}, status=400)
 
-        university_id = d.get("university_id") or None
+        university_id = d.get("admission_number") or d.get("university_id") or None
         if university_id and User.objects.filter(university_id=university_id).exists():
             return Response({"detail": "University ID already registered."}, status=400)
 
@@ -86,6 +86,22 @@ class ProfileView(APIView):
             user.last_name = parts[1] if len(parts) > 1 else ""
         if "phone_number" in request.data:
             user.phone_number = request.data["phone_number"]
+        if "admission_number" in request.data or "university_id" in request.data:
+            admission_number = request.data.get("admission_number")
+            if admission_number is None:
+                admission_number = request.data.get("university_id")
+            admission_number = admission_number or None
+            if (
+                admission_number
+                and User.objects.filter(university_id=admission_number)
+                .exclude(pk=user.pk)
+                .exists()
+            ):
+                return Response(
+                    {"detail": "This admission number is already in use."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            user.university_id = admission_number
         user.save()
         return Response(UserSerializer(user).data)
 
