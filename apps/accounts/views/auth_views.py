@@ -25,6 +25,15 @@ resend.api_key = settings.RESEND_API_KEY
 
 # Using Django sessions instead of issuing JWTs; login the user to create a session
 
+def get_tokens_for_user(user):
+    """Issue a fresh JWT access/refresh pair for a user."""
+    refresh = RefreshToken.for_user(user)
+    return {
+        "refresh": str(refresh),
+        "access": str(refresh.access_token),
+    }
+
+
 def serialize_user(user):
     student = getattr(user, 'student_profile', None)
     program = getattr(student, 'program', None)
