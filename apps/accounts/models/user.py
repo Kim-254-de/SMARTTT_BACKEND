@@ -14,6 +14,7 @@ class User(AbstractUser, BaseModel):
     role = models.CharField(max_length=20, choices=Role.choices)
     university_id = models.CharField(max_length=30, unique=True, blank=True, null=True)
     phone_number = models.CharField(max_length=30, blank=True)
+    preferred_language =models.CharField(max_length=5, choices=[('en', 'English'), ('sw', 'Swahili'), ('fr', 'French')], default='en')
 
     def __str__(self) -> str:
         return f"{self.get_full_name()} ({self.university_id})"
