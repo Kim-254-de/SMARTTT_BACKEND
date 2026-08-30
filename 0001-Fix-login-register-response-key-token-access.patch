@@ -1,0 +1,41 @@
+From a14b827a719b4683def98b3e62b379f6250feea2 Mon Sep 17 00:00:00 2001
+From: Emmanuel Kimathi <kimathi@example.com>
+Date: Sun, 23 Aug 2026 10:28:45 +0000
+Subject: [PATCH] Fix login/register response key: 'token' -> 'access'
+
+Frontend's AuthRepository._storeTokens reads data['access'] per the
+standard SimpleJWT contract (and per this file's own documented
+response format at ProfileView/Google auth), but Login/RegisterView
+were returning the access token under 'token' instead. This meant
+the Flutter app never stored an access token after login, so every
+subsequent authenticated request went out with no Authorization
+header and came back 401 - even though login itself returned 200.
+---
+ apps/accounts/views/auth_views.py | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/apps/accounts/views/auth_views.py b/apps/accounts/views/auth_views.py
+index 1a79a86..232b36f 100644
+--- a/apps/accounts/views/auth_views.py
++++ b/apps/accounts/views/auth_views.py
+@@ -149,7 +149,7 @@ class RegisterView(APIView):
+ 
+         tokens = get_tokens_for_user(user)
+         return Response({
+-            "token": tokens['access'],
++            "access": tokens['access'],
+             "refresh": tokens['refresh'],
+             "user": serialize_user(user)
+         }, status=status.HTTP_201_CREATED)
+@@ -167,7 +167,7 @@ class LoginView(APIView):
+ 
+         tokens = get_tokens_for_user(user)
+         return Response({
+-            "token": tokens['access'],
++            "access": tokens['access'],
+             "refresh": tokens['refresh'],
+             "user": serialize_user(user)
+         })
+-- 
+2.43.0
+

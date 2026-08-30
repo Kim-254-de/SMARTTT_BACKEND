@@ -1,0 +1,2980 @@
+From 9a7dd942a90b9d57e4db86292b323900819e0ada Mon Sep 17 00:00:00 2001
+From: Emmanuel Kimathi <kimathi@example.com>
+Date: Sat, 22 Aug 2026 17:56:01 +0000
+Subject: [PATCH] Resolve merge conflict between old core app and new modular
+ apps
+
+- Remove apps.core (Faculty, Department, Program, Room, Lecturer,
+  ValidStaffID) in favor of the new modular apps.departments,
+  apps.lecturers, apps.programs, apps.rooms
+- Move ValidStaffID into apps.accounts (its only real consumer)
+- Redirect all apps.core imports (mapper.py, notifications, accounts
+  auth_views.py) to the new modular apps
+- Wire departments/programs/rooms/lecturers/units/students/enrollments
+  urls into config/urls.py (previously only reachable via apps.core)
+- Remove dead duplicate files shadowed by same-named packages
+  (accounts/{models,serializers,views}.py, timetable/{models,
+  serializers,views}.py, students/urls/urls.py)
+- Fix TimetableSlotAdmin referencing removed 'day' field -> day_of_week
+- Fix StudentUnit.unit FK to point at units.Unit instead of removed
+  timetable.Unit
+- Clean up duplicated router blocks in departments/programs/units urls.py
+- Reset and regenerate all migrations project-wide, since old core-era
+  migration history no longer matched current models (test data only,
+  confirmed safe to reset)
+
+Verified: manage.py check passes clean, full migrate applies
+end-to-end against a fresh database.
+---
+ apps/accounts/migrations/0001_initial.py      |  42 +-
+ .../migrations/0002_alter_user_role.py        |  18 -
+ .../0002_alter_user_university_id.py          |  18 -
+ .../migrations/0003_passwordresettoken.py     |  54 --
+ .../0004_adapt_passwordresettoken.py          |  75 ---
+ apps/accounts/models.py                       |  24 -
+ apps/accounts/models/__init__.py              |   1 +
+ apps/accounts/models/valid_staff_id.py        |  21 +
+ apps/accounts/serializers.py                  |  25 -
+ apps/accounts/views.py                        | 533 ------------------
+ apps/accounts/views/auth_views.py             |  12 +-
+ apps/analytics/migrations/0001_initial.py     |   2 +-
+ apps/core/__init__.py                         |   0
+ apps/core/admin.py                            |   8 -
+ apps/core/apps.py                             |   5 -
+ apps/core/migrations/0001_initial.py          |  83 ---
+ apps/core/migrations/0002_validstaffid.py     |  27 -
+ apps/core/migrations/__init__.py              |   0
+ apps/core/models.py                           | 101 ----
+ apps/core/serializers.py                      |  42 --
+ apps/core/urls.py                             |  12 -
+ apps/core/views.py                            |  62 --
+ apps/courses/migrations/0001_initial.py       |   5 +-
+ apps/courses/models.py                        |   2 +-
+ apps/curriculum/migrations/0001_initial.py    | 224 +++-----
+ apps/departments/migrations/0001_initial.py   |   2 +-
+ apps/departments/urls.py                      |  12 -
+ apps/enrollments/migrations/0001_initial.py   |  13 +-
+ apps/enrollments/migrations/0002_initial.py   |  22 -
+ apps/enrollments/migrations/0003_initial.py   |  26 -
+ ...dentenrollment_unique_together_and_more.py |  30 -
+ apps/lecturers/migrations/0001_initial.py     |   2 +-
+ apps/notifications/migrations/0001_initial.py |   6 +-
+ apps/notifications/models.py                  |   2 +-
+ apps/notifications/views.py                   |   2 +-
+ apps/programs/migrations/0001_initial.py      |   2 +-
+ apps/programs/urls.py                         |   8 -
+ apps/rooms/migrations/0001_initial.py         |   2 +-
+ apps/students/migrations/0001_initial.py      |   3 +-
+ apps/students/urls/urls.py                    |  31 -
+ apps/timetable/admin.py                       |   4 +-
+ apps/timetable/migrations/0001_initial.py     | 135 +++--
+ ..._timetableslot_curriculum_unit_and_more.py |  14 -
+ .../0002_timetableslot_lecturer_name_text.py  |  18 -
+ .../migrations/0003_merge_20260821_1317.py    |  14 -
+ apps/timetable/models.py                      | 119 ----
+ apps/timetable/serializers.py                 |  55 --
+ apps/timetable/services/mapper.py             |   5 +-
+ apps/timetable/views.py                       | 268 ---------
+ apps/units/migrations/0001_initial.py         |   2 +-
+ apps/units/urls.py                            |   8 -
+ apps/uploads/migrations/0001_initial.py       |   4 +-
+ ...002_alter_timetableupload_uploaded_file.py |  19 -
+ ...003_alter_timetableupload_uploaded_file.py |  19 -
+ ...004_alter_timetableupload_uploaded_file.py |  19 -
+ config/settings/base.py                       |   1 -
+ config/urls.py                                |   8 +-
+ 57 files changed, 277 insertions(+), 1994 deletions(-)
+ delete mode 100644 apps/accounts/migrations/0002_alter_user_role.py
+ delete mode 100644 apps/accounts/migrations/0002_alter_user_university_id.py
+ delete mode 100644 apps/accounts/migrations/0003_passwordresettoken.py
+ delete mode 100644 apps/accounts/migrations/0004_adapt_passwordresettoken.py
+ delete mode 100644 apps/accounts/models.py
+ create mode 100644 apps/accounts/models/valid_staff_id.py
+ delete mode 100644 apps/accounts/serializers.py
+ delete mode 100644 apps/accounts/views.py
+ delete mode 100644 apps/core/__init__.py
+ delete mode 100644 apps/core/admin.py
+ delete mode 100644 apps/core/apps.py
+ delete mode 100644 apps/core/migrations/0001_initial.py
+ delete mode 100644 apps/core/migrations/0002_validstaffid.py
+ delete mode 100644 apps/core/migrations/__init__.py
+ delete mode 100644 apps/core/models.py
+ delete mode 100644 apps/core/serializers.py
+ delete mode 100644 apps/core/urls.py
+ delete mode 100644 apps/core/views.py
+ delete mode 100644 apps/enrollments/migrations/0002_initial.py
+ delete mode 100644 apps/enrollments/migrations/0003_initial.py
+ delete mode 100644 apps/enrollments/migrations/0004_alter_studentenrollment_unique_together_and_more.py
+ delete mode 100644 apps/students/urls/urls.py
+ delete mode 100644 apps/timetable/migrations/0002_remove_timetableslot_curriculum_unit_and_more.py
+ delete mode 100644 apps/timetable/migrations/0002_timetableslot_lecturer_name_text.py
+ delete mode 100644 apps/timetable/migrations/0003_merge_20260821_1317.py
+ delete mode 100644 apps/timetable/models.py
+ delete mode 100644 apps/timetable/serializers.py
+ delete mode 100644 apps/timetable/views.py
+ delete mode 100644 apps/uploads/migrations/0002_alter_timetableupload_uploaded_file.py
+ delete mode 100644 apps/uploads/migrations/0003_alter_timetableupload_uploaded_file.py
+ delete mode 100644 apps/uploads/migrations/0004_alter_timetableupload_uploaded_file.py
+
+diff --git a/apps/accounts/migrations/0001_initial.py b/apps/accounts/migrations/0001_initial.py
+index c5213fe..14b7d04 100644
+--- a/apps/accounts/migrations/0001_initial.py
++++ b/apps/accounts/migrations/0001_initial.py
+@@ -1,9 +1,12 @@
+-# Generated by Django 5.1 on 2026-06-30 10:22
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
++import apps.accounts.models.password_reset_token
+ import django.contrib.auth.models
+ import django.contrib.auth.validators
++import django.db.models.deletion
+ import django.utils.timezone
+ import uuid
++from django.conf import settings
+ from django.db import migrations, models
+ 
+ 
+@@ -16,6 +19,19 @@ class Migration(migrations.Migration):
+     ]
+ 
+     operations = [
++        migrations.CreateModel(
++            name='ValidStaffID',
++            fields=[
++                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
++                ('staff_id', models.CharField(max_length=50, unique=True)),
++                ('name_hint', models.CharField(blank=True, max_length=255)),
++                ('is_claimed', models.BooleanField(default=False)),
++                ('uploaded_at', models.DateTimeField(auto_now_add=True)),
++            ],
++            options={
++                'ordering': ['staff_id'],
++            },
++        ),
+         migrations.CreateModel(
+             name='User',
+             fields=[
+@@ -30,9 +46,11 @@ class Migration(migrations.Migration):
+                 ('is_active', models.BooleanField(default=True, help_text='Designates whether this user should be treated as active. Unselect this instead of deleting accounts.', verbose_name='active')),
+                 ('date_joined', models.DateTimeField(default=django.utils.timezone.now, verbose_name='date joined')),
+                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ('role', models.CharField(choices=[('student', 'Student'), ('admin', 'Admin')], default='student', max_length=20)),
+-                ('university_id', models.CharField(blank=True, max_length=50, null=True, unique=True)),
+-                ('phone_number', models.CharField(blank=True, max_length=20)),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
++                ('role', models.CharField(choices=[('student', 'Student'), ('lecturer', 'Lecturer'), ('registrar', 'Registrar'), ('admin', 'Admin')], max_length=20)),
++                ('university_id', models.CharField(blank=True, max_length=30, null=True, unique=True)),
++                ('phone_number', models.CharField(blank=True, max_length=30)),
+                 ('groups', models.ManyToManyField(blank=True, help_text='The groups this user belongs to. A user will get all permissions granted to each of their groups.', related_name='user_set', related_query_name='user', to='auth.group', verbose_name='groups')),
+                 ('user_permissions', models.ManyToManyField(blank=True, help_text='Specific permissions for this user.', related_name='user_set', related_query_name='user', to='auth.permission', verbose_name='user permissions')),
+             ],
+@@ -45,4 +63,20 @@ class Migration(migrations.Migration):
+                 ('objects', django.contrib.auth.models.UserManager()),
+             ],
+         ),
++        migrations.CreateModel(
++            name='PasswordResetToken',
++            fields=[
++                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
++                ('token', models.CharField(db_index=True, default=apps.accounts.models.password_reset_token.generate_token, max_length=128, unique=True)),
++                ('expires_at', models.DateTimeField(default=apps.accounts.models.password_reset_token.default_expiration)),
++                ('is_used', models.BooleanField(default=False)),
++                ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='password_reset_tokens', to=settings.AUTH_USER_MODEL)),
++            ],
++            options={
++                'ordering': ['-created_at'],
++                'indexes': [models.Index(fields=['token'], name='idx_reset_token'), models.Index(fields=['user', 'expires_at'], name='idx_reset_user_exp')],
++            },
++        ),
+     ]
+diff --git a/apps/accounts/migrations/0002_alter_user_role.py b/apps/accounts/migrations/0002_alter_user_role.py
+deleted file mode 100644
+index e177478..0000000
+--- a/apps/accounts/migrations/0002_alter_user_role.py
++++ /dev/null
+@@ -1,18 +0,0 @@
+-# Generated by Django 5.1 on 2026-07-17 20:29
+-
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ('accounts', '0001_initial'),
+-    ]
+-
+-    operations = [
+-        migrations.AlterField(
+-            model_name='user',
+-            name='role',
+-            field=models.CharField(choices=[('student', 'Student'), ('lecturer', 'Lecturer'), ('admin', 'Admin')], default='student', max_length=20),
+-        ),
+-    ]
+diff --git a/apps/accounts/migrations/0002_alter_user_university_id.py b/apps/accounts/migrations/0002_alter_user_university_id.py
+deleted file mode 100644
+index 513ec81..0000000
+--- a/apps/accounts/migrations/0002_alter_user_university_id.py
++++ /dev/null
+@@ -1,18 +0,0 @@
+-# Generated by Django 5.1 on 2026-06-09 12:43
+-
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ('accounts', '0001_initial'),
+-    ]
+-
+-    operations = [
+-        migrations.AlterField(
+-            model_name='user',
+-            name='university_id',
+-            field=models.CharField(blank=True, max_length=30, null=True, unique=True),
+-        ),
+-    ]
+diff --git a/apps/accounts/migrations/0003_passwordresettoken.py b/apps/accounts/migrations/0003_passwordresettoken.py
+deleted file mode 100644
+index 16b5a00..0000000
+--- a/apps/accounts/migrations/0003_passwordresettoken.py
++++ /dev/null
+@@ -1,54 +0,0 @@
+-# Generated by Copilot for password reset support.
+-
+-from django.conf import settings
+-from django.db import migrations, models
+-import django.db.models.deletion
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ("accounts", "0002_alter_user_role"),
+-        ("accounts", "0002_alter_user_university_id"),
+-    ]
+-
+-    operations = [
+-        migrations.CreateModel(
+-            name="PasswordResetToken",
+-            fields=[
+-                (
+-                    "id",
+-                    models.BigAutoField(
+-                        auto_created=True,
+-                        primary_key=True,
+-                        serialize=False,
+-                        verbose_name="ID",
+-                    ),
+-                ),
+-                ("created_at", models.DateTimeField(auto_now_add=True)),
+-                ("updated_at", models.DateTimeField(auto_now=True)),
+-                ("token", models.CharField(db_index=True, max_length=128, unique=True)),
+-                ("expires_at", models.DateTimeField()),
+-                ("used_at", models.DateTimeField(blank=True, null=True)),
+-                (
+-                    "user",
+-                    models.ForeignKey(
+-                        on_delete=django.db.models.deletion.CASCADE,
+-                        related_name="password_reset_tokens",
+-                        to=settings.AUTH_USER_MODEL,
+-                    ),
+-                ),
+-            ],
+-            options={
+-                "ordering": ["-created_at"],
+-            },
+-        ),
+-        migrations.AddIndex(
+-            model_name="passwordresettoken",
+-            index=models.Index(fields=["token"], name="idx_reset_token"),
+-        ),
+-        migrations.AddIndex(
+-            model_name="passwordresettoken",
+-            index=models.Index(fields=["user", "expires_at"], name="idx_reset_user_exp"),
+-        ),
+-    ]
+\ No newline at end of file
+diff --git a/apps/accounts/migrations/0004_adapt_passwordresettoken.py b/apps/accounts/migrations/0004_adapt_passwordresettoken.py
+deleted file mode 100644
+index d95d072..0000000
+--- a/apps/accounts/migrations/0004_adapt_passwordresettoken.py
++++ /dev/null
+@@ -1,75 +0,0 @@
+-from django.db import migrations, models
+-import uuid
+-
+-import apps.accounts.models.password_reset_token
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ("accounts", "0003_passwordresettoken"),
+-    ]
+-
+-    operations = [
+-        migrations.RemoveField(
+-            model_name="passwordresettoken",
+-            name="used_at",
+-        ),
+-        migrations.AddField(
+-            model_name="passwordresettoken",
+-            name="is_used",
+-            field=models.BooleanField(default=False),
+-        ),
+-        migrations.AlterField(
+-            model_name="passwordresettoken",
+-            name="token",
+-            field=models.CharField(
+-                db_index=True,
+-                default=apps.accounts.models.password_reset_token.generate_token,
+-                max_length=128,
+-                unique=True,
+-            ),
+-        ),
+-        migrations.AlterField(
+-            model_name="passwordresettoken",
+-            name="expires_at",
+-            field=models.DateTimeField(
+-                default=apps.accounts.models.password_reset_token.default_expiration,
+-            ),
+-        ),
+-        migrations.SeparateDatabaseAndState(
+-            database_operations=[
+-                migrations.RunSQL(
+-                    sql="""
+-                        ALTER TABLE accounts_passwordresettoken
+-                            ADD COLUMN id_uuid uuid;
+-                        UPDATE accounts_passwordresettoken
+-                            SET id_uuid = md5(random()::text || clock_timestamp()::text)::uuid;
+-                        ALTER TABLE accounts_passwordresettoken
+-                            DROP CONSTRAINT accounts_passwordresettoken_pkey;
+-                        ALTER TABLE accounts_passwordresettoken
+-                            DROP COLUMN id;
+-                        ALTER TABLE accounts_passwordresettoken
+-                            RENAME COLUMN id_uuid TO id;
+-                        ALTER TABLE accounts_passwordresettoken
+-                            ALTER COLUMN id SET NOT NULL;
+-                        ALTER TABLE accounts_passwordresettoken
+-                            ADD CONSTRAINT accounts_passwordresettoken_pkey PRIMARY KEY (id);
+-                    """,
+-                    reverse_sql=migrations.RunSQL.noop,
+-                ),
+-            ],
+-            state_operations=[
+-                migrations.AlterField(
+-                    model_name="passwordresettoken",
+-                    name="id",
+-                    field=models.UUIDField(
+-                        default=uuid.uuid4,
+-                        editable=False,
+-                        primary_key=True,
+-                        serialize=False,
+-                    ),
+-                ),
+-            ],
+-        ),
+-    ]
+\ No newline at end of file
+diff --git a/apps/accounts/models.py b/apps/accounts/models.py
+deleted file mode 100644
+index 91ff686..0000000
+--- a/apps/accounts/models.py
++++ /dev/null
+@@ -1,24 +0,0 @@
+-import uuid
+-from django.contrib.auth.models import AbstractUser
+-from django.db import models
+-
+-
+-class User(AbstractUser):
+-    """
+-    Custom user. username = email for simplicity.
+-    role drives permission logic throughout the system.
+-    """
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-
+-    class Role(models.TextChoices):
+-        STUDENT = "student", "Student"
+-        LECTURER = "lecturer", "Lecturer"
+-        ADMIN = "admin", "Admin"
+-
+-    role = models.CharField(max_length=20, choices=Role.choices, default=Role.STUDENT)
+-    # Admission / staff number e.g. TUN/CS/001/2023
+-    university_id = models.CharField(max_length=50, unique=True, blank=True, null=True)
+-    phone_number = models.CharField(max_length=20, blank=True)
+-
+-    def __str__(self):
+-        return f"{self.get_full_name()} ({self.university_id or self.email})"
+diff --git a/apps/accounts/models/__init__.py b/apps/accounts/models/__init__.py
+index 5a46371..bcde22a 100644
+--- a/apps/accounts/models/__init__.py
++++ b/apps/accounts/models/__init__.py
+@@ -1,2 +1,3 @@
+ from .user import User
+ from .password_reset_token import PasswordResetToken
++from .valid_staff_id import ValidStaffID
+diff --git a/apps/accounts/models/valid_staff_id.py b/apps/accounts/models/valid_staff_id.py
+new file mode 100644
+index 0000000..f3c030f
+--- /dev/null
++++ b/apps/accounts/models/valid_staff_id.py
+@@ -0,0 +1,21 @@
++import uuid
++
++from django.db import models
++
++
++class ValidStaffID(models.Model):
++    """
++    Pre-loaded list of valid staff IDs uploaded by admin via CSV.
++    Lecturer registration checks against this list.
++    """
++    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
++    staff_id = models.CharField(max_length=50, unique=True)
++    name_hint = models.CharField(max_length=255, blank=True)  # optional name from CSV
++    is_claimed = models.BooleanField(default=False)  # True once a lecturer registers
++    uploaded_at = models.DateTimeField(auto_now_add=True)
++
++    class Meta:
++        ordering = ["staff_id"]
++
++    def __str__(self):
++        return f"{self.staff_id} ({'claimed' if self.is_claimed else 'unclaimed'})"
+diff --git a/apps/accounts/serializers.py b/apps/accounts/serializers.py
+deleted file mode 100644
+index 4941f82..0000000
+--- a/apps/accounts/serializers.py
++++ /dev/null
+@@ -1,25 +0,0 @@
+-from rest_framework import serializers
+-from .models import User
+-
+-
+-class RegisterSerializer(serializers.Serializer):
+-    email = serializers.EmailField()
+-    password = serializers.CharField(write_only=True, min_length=6)
+-    full_name = serializers.CharField()
+-    university_id = serializers.CharField(required=False, allow_blank=True)
+-
+-
+-class LoginSerializer(serializers.Serializer):
+-    email = serializers.EmailField()
+-    password = serializers.CharField(write_only=True)
+-
+-
+-class UserSerializer(serializers.ModelSerializer):
+-    full_name = serializers.SerializerMethodField()
+-
+-    class Meta:
+-        model = User
+-        fields = ["id", "email", "full_name", "university_id", "role", "phone_number"]
+-
+-    def get_full_name(self, obj):
+-        return obj.get_full_name()
+diff --git a/apps/accounts/views.py b/apps/accounts/views.py
+deleted file mode 100644
+index 1bea685..0000000
+--- a/apps/accounts/views.py
++++ /dev/null
+@@ -1,533 +0,0 @@
+-from django.contrib.auth import authenticate
+-from django.conf import settings
+-from django.db import transaction
+-from rest_framework import status
+-from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
+-from rest_framework.response import Response
+-from rest_framework.views import APIView
+-from rest_framework_simplejwt.tokens import RefreshToken
+-from rest_framework.parsers import MultiPartParser
+-from django.utils import timezone
+-from datetime import timedelta
+-import os
+-import secrets
+-import requests
+-import resend
+-
+-from .models import PasswordResetToken, User
+-from .serializers import LoginSerializer, RegisterSerializer, UserSerializer
+-
+-resend.api_key = settings.RESEND_API_KEY
+-
+-# Firebase token verification — accepts Firebase ID tokens (what Flutter sends)
+-FIREBASE_VERIFY_URL = (
+-    "https://identitytoolkit.googleapis.com/v1/accounts:lookup"
+-    "?key=AIzaSyAwYcCoaR0pRPli20r0LQIy3h-R1lHep1c"
+-)
+-
+-
+-def _tokens(user):
+-    refresh = RefreshToken.for_user(user)
+-    return {"access": str(refresh.access_token), "refresh": str(refresh)}
+-
+-
+-class RegisterView(APIView):
+-    permission_classes = [AllowAny]
+-
+-    @transaction.atomic
+-    def post(self, request):
+-        s = RegisterSerializer(data=request.data)
+-        s.is_valid(raise_exception=True)
+-        d = s.validated_data
+-
+-        email = d["email"].lower()
+-        if User.objects.filter(email=email).exists():
+-            return Response({"detail": "Email already registered."}, status=400)
+-
+-        university_id = d.get("university_id") or None
+-        if university_id and User.objects.filter(university_id=university_id).exists():
+-            return Response({"detail": "University ID already registered."}, status=400)
+-
+-        parts = d["full_name"].split(" ", 1)
+-        user = User.objects.create_user(
+-            username=email,
+-            email=email,
+-            password=d["password"],
+-            first_name=parts[0],
+-            last_name=parts[1] if len(parts) > 1 else "",
+-            university_id=university_id,
+-            role=User.Role.STUDENT,
+-        )
+-        return Response(
+-            {"user": UserSerializer(user).data, **_tokens(user)},
+-            status=status.HTTP_201_CREATED,
+-        )
+-
+-
+-class LoginView(APIView):
+-    permission_classes = [AllowAny]
+-
+-    def post(self, request):
+-        s = LoginSerializer(data=request.data)
+-        s.is_valid(raise_exception=True)
+-        user = authenticate(
+-            username=s.validated_data["email"].lower(),
+-            password=s.validated_data["password"],
+-        )
+-        if user is None:
+-            return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
+-        return Response({"user": UserSerializer(user).data, **_tokens(user)})
+-
+-
+-class ProfileView(APIView):
+-    permission_classes = [IsAuthenticated]
+-
+-    def get(self, request):
+-        return Response(UserSerializer(request.user).data)
+-
+-    def patch(self, request):
+-        user = request.user
+-        full_name = request.data.get("full_name")
+-        if full_name:
+-            parts = full_name.split(" ", 1)
+-            user.first_name = parts[0]
+-            user.last_name = parts[1] if len(parts) > 1 else ""
+-        if "phone_number" in request.data:
+-            user.phone_number = request.data["phone_number"]
+-        user.save()
+-        return Response(UserSerializer(user).data)
+-
+-
+-class PasswordResetRequestView(APIView):
+-    permission_classes = [AllowAny]
+-
+-    def post(self, request):
+-        email = str(request.data.get("email", "")).strip().lower()
+-        if not email:
+-            return Response({"detail": "Email is required."}, status=status.HTTP_400_BAD_REQUEST)
+-
+-        user = User.objects.filter(email=email).first()
+-        if user is None:
+-            return Response({"detail": "If that email exists, a reset link has been sent."})
+-
+-        token = secrets.token_urlsafe(32)
+-        while PasswordResetToken.objects.filter(token=token).exists():
+-            token = secrets.token_urlsafe(32)
+-
+-        expires_at = timezone.now() + timedelta(minutes=15)
+-        PasswordResetToken.objects.create(user=user, token=token, expires_at=expires_at)
+-
+-        reset_url = f"https://nextup.co.ke/reset-password.html?token={token}"
+-
+-        try:
+-            resend.Emails.send({
+-                "from": settings.DEFAULT_FROM_EMAIL,
+-                "to": [user.email],
+-                "subject": "Reset your NextUp password",
+-                "html": f"""
+-                    <div style="margin:0;background:#f5f7fb;padding:40px 16px;font-family:Arial,sans-serif;color:#172033;">
+-                      <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e9f2;border-radius:16px;padding:40px;">
+-                        <h1 style="margin:0 0 20px;font-size:26px;color:#172033;">Reset your password</h1>
+-                        <p style="margin:0 0 16px;font-size:16px;line-height:1.6;">Hello {user.get_full_name() or user.email},</p>
+-                        <p style="margin:0 0 28px;font-size:16px;line-height:1.6;">We received a request to set a new password for your NextUp account.</p>
+-                        <p style="margin:0 0 28px;"><a href="{reset_url}" style="display:inline-block;background:#2563eb;color:#ffffff;padding:14px 24px;border-radius:8px;text-decoration:none;font-weight:700;">Set New Password</a></p>
+-                        <p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#526078;">This link expires strictly in 15 minutes.</p>
+-                        <p style="margin:0;font-size:14px;line-height:1.6;color:#526078;">If you did not request this reset, you can safely ignore this email.</p>
+-                      </div>
+-                    </div>
+-                """,
+-            })
+-        except Exception:
+-            return Response(
+-                {"detail": "Unable to send password reset email."},
+-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+-            )
+-
+-        return Response({"detail": "If that email exists, a reset link has been sent."})
+-
+-
+-class PasswordResetConfirmView(APIView):
+-    permission_classes = [AllowAny]
+-
+-    def post(self, request):
+-        token = str(request.data.get("token", "")).strip()
+-        new_password = str(request.data.get("new_password", ""))
+-        confirm_password = str(request.data.get("confirm_password", ""))
+-
+-        if not token:
+-            return Response({"detail": "Token is required."}, status=status.HTTP_400_BAD_REQUEST)
+-        if not new_password:
+-            return Response({"detail": "New password is required."}, status=status.HTTP_400_BAD_REQUEST)
+-        if new_password != confirm_password:
+-            return Response({"detail": "Passwords do not match."}, status=status.HTTP_400_BAD_REQUEST)
+-        if len(new_password) < 6:
+-            return Response({"detail": "Password must be at least 6 characters."}, status=status.HTTP_400_BAD_REQUEST)
+-
+-        reset_token = PasswordResetToken.objects.select_related("user").filter(
+-            token=token,
+-            is_used=False,
+-            expires_at__gt=timezone.now(),
+-        ).first()
+-
+-        if reset_token is None:
+-            return Response({"detail": "Invalid or expired link."}, status=status.HTTP_400_BAD_REQUEST)
+-
+-        user = reset_token.user
+-        user.set_password(new_password)
+-        user.save(update_fields=["password"])
+-
+-        reset_token.is_used = True
+-        reset_token.save(update_fields=["is_used"])
+-
+-        return Response({"detail": "Password updated successfully."})
+-
+-
+-class GoogleAuthView(APIView):
+-    """
+-    POST /api/v1/auth/google/
+-    Body: { "id_token": "<Firebase ID token>" }
+-    Returns: { "user": {...}, "access": "...", "refresh": "..." }
+-
+-    Flutter sends a Firebase ID token (not a raw Google OAuth token).
+-    We verify it via Firebase's accounts:lookup endpoint, which returns
+-    the user's profile from Firebase Auth.
+-    """
+-    permission_classes = [AllowAny]
+-
+-    def post(self, request):
+-        id_token = request.data.get("id_token")
+-        if not id_token:
+-            return Response({"detail": "id_token is required."}, status=400)
+-
+-        # Verify Firebase ID token
+-        try:
+-            resp = requests.post(
+-                FIREBASE_VERIFY_URL,
+-                json={"idToken": id_token},
+-                timeout=10,
+-            )
+-            if resp.status_code != 200:
+-                return Response(
+-                    {"detail": "Invalid Google token. Please try again."},
+-                    status=401,
+-                )
+-            firebase_data = resp.json()
+-        except requests.RequestException:
+-            return Response(
+-                {"detail": "Could not verify token with Google. Check your connection."},
+-                status=503,
+-            )
+-
+-        # Firebase returns a users array
+-        users_list = firebase_data.get("users", [])
+-        if not users_list:
+-            return Response({"detail": "Token verification failed."}, status=401)
+-
+-        user_info = users_list[0]
+-
+-        # Extract user info — Firebase field names differ from Google's tokeninfo
+-        email = user_info.get("email")
+-        email_verified = user_info.get("emailVerified", False)
+-        full_name = user_info.get("displayName", "")
+-
+-        if not email:
+-            return Response({"detail": "Google account has no email address."}, status=400)
+-
+-        if not email_verified:
+-            return Response({"detail": "Google email is not verified."}, status=400)
+-
+-        # Create or retrieve the user
+-        with transaction.atomic():
+-            user = User.objects.filter(email=email.lower()).first()
+-
+-            if user:
+-                # Existing user — update name if not set
+-                if not user.first_name and full_name:
+-                    parts = full_name.split(" ", 1)
+-                    user.first_name = parts[0]
+-                    user.last_name = parts[1] if len(parts) > 1 else ""
+-                    user.save(update_fields=["first_name", "last_name"])
+-            else:
+-                # New user — create from Google data, no password needed
+-                parts = full_name.split(" ", 1) if full_name else ["", ""]
+-                user = User.objects.create_user(
+-                    username=email.lower(),
+-                    email=email.lower(),
+-                    password=None,
+-                    first_name=parts[0],
+-                    last_name=parts[1] if len(parts) > 1 else "",
+-                    role=User.Role.STUDENT,
+-                )
+-
+-        return Response({
+-            "user": UserSerializer(user).data,
+-            **_tokens(user),
+-        })
+-        
+-        
+-class LecturerRegisterView(APIView):
+-    """
+-    POST /api/v1/auth/lecturer/register/
+-    Lecturer self-registration — validates staff ID against pre-loaded list.
+-    Body: {
+-        "staff_id": "TUN/ST/001",
+-        "email": "lecturer@tharaka.ac.ke",
+-        "full_name": "Dr. Jane Doe",
+-        "password": "...",
+-        "department": "<department_uuid>"  // optional
+-    }
+-    """
+-    permission_classes = [AllowAny]
+-
+-    @transaction.atomic
+-    def post(self, request):
+-        staff_id = request.data.get("staff_id", "").strip()
+-        email = request.data.get("email", "").strip().lower()
+-        full_name = request.data.get("full_name", "").strip()
+-        password = request.data.get("password", "")
+-        department_id = request.data.get("department")
+-
+-        if not all([staff_id, email, full_name, password]):
+-            return Response(
+-                {"detail": "staff_id, email, full_name, and password are required."},
+-                status=400,
+-            )
+-
+-        if len(password) < 6:
+-            return Response({"detail": "Password must be at least 6 characters."}, status=400)
+-
+-        # Validate staff ID
+-        from apps.core.models import ValidStaffID, Department, Lecturer
+-        try:
+-            valid_staff = ValidStaffID.objects.get(staff_id__iexact=staff_id)
+-        except ValidStaffID.DoesNotExist:
+-            return Response(
+-                {"detail": "Staff ID not found. Please contact the university ICT department."},
+-                status=400,
+-            )
+-
+-        if valid_staff.is_claimed:
+-            return Response(
+-                {"detail": "This staff ID has already been registered. Contact ICT if this is an error."},
+-                status=400,
+-            )
+-
+-        # Check email not already used
+-        if User.objects.filter(email=email).exists():
+-            return Response({"detail": "Email already registered."}, status=400)
+-
+-        # Resolve department
+-        department = None
+-        if department_id:
+-            try:
+-                department = Department.objects.get(pk=department_id)
+-            except Department.DoesNotExist:
+-                pass
+-
+-        # Create User
+-        parts = full_name.split(" ", 1)
+-        user = User.objects.create_user(
+-            username=email,
+-            email=email,
+-            password=password,
+-            first_name=parts[0],
+-            last_name=parts[1] if len(parts) > 1 else "",
+-            university_id=staff_id,
+-            role=User.Role.LECTURER,
+-        )
+-
+-        # Create Lecturer profile
+-        if department:
+-            Lecturer.objects.create(user=user, department=department, title="")
+-
+-        # Mark staff ID as claimed
+-        valid_staff.is_claimed = True
+-        valid_staff.save(update_fields=["is_claimed"])
+-
+-        return Response(
+-            {"user": UserSerializer(user).data, **_tokens(user)},
+-            status=status.HTTP_201_CREATED,
+-        )
+-
+-
+-class StaffIDUploadView(APIView):
+-    """
+-    POST /api/v1/auth/staff-ids/upload/
+-    Admin uploads a CSV of valid staff IDs.
+-    CSV format: staff_id,name (header row optional)
+-    """
+-    permission_classes = [IsAdminUser]
+-    parser_classes = [MultiPartParser]
+-
+-    def post(self, request):
+-        import csv, io
+-        from apps.core.models import ValidStaffID
+-
+-        file = request.FILES.get("file")
+-        if not file:
+-            return Response({"detail": "No file provided."}, status=400)
+-
+-        try:
+-            content = file.read().decode("utf-8")
+-            reader = csv.reader(io.StringIO(content))
+-            created = 0
+-            skipped = 0
+-            for row in reader:
+-                if not row:
+-                    continue
+-                staff_id = row[0].strip()
+-                if not staff_id or staff_id.lower() == "staff_id":
+-                    continue  # skip header or empty
+-                name_hint = row[1].strip() if len(row) > 1 else ""
+-                _, was_created = ValidStaffID.objects.get_or_create(
+-                    staff_id=staff_id,
+-                    defaults={"name_hint": name_hint},
+-                )
+-                if was_created:
+-                    created += 1
+-                else:
+-                    skipped += 1
+-        except Exception as exc:
+-            return Response({"detail": f"Could not parse CSV: {exc}"}, status=400)
+-
+-        return Response({
+-            "detail": f"Uploaded {created} new staff ID(s). {skipped} already existed."
+-        })
+-
+-
+-class StaffIDListView(APIView):
+-    """
+-    GET /api/v1/auth/staff-ids/
+-    Admin views all staff IDs and their claim status.
+-    """
+-    permission_classes = [IsAdminUser]
+-
+-    def get(self, request):
+-        from apps.core.models import ValidStaffID
+-        ids = ValidStaffID.objects.all().values("staff_id", "name_hint", "is_claimed", "uploaded_at")
+-        return Response(list(ids))
+-
+-
+-class LecturerProfileView(APIView):
+-    permission_classes = [IsAuthenticated]
+-
+-    def get(self, request):
+-        from apps.timetable.models import AcademicTerm, TimetableSlot
+-        from apps.timetable.serializers import TimetableSlotSerializer
+-        from apps.core.models import Lecturer
+-
+-        user = request.user
+-        if user.role not in ["lecturer"]:
+-            return Response({"detail": "Not a lecturer account."}, status=403)
+-
+-        term = AcademicTerm.objects.filter(is_current=True).first()
+-        slots = []
+-        slot_source = "none"
+-
+-        if term:
+-            # ── Priority 1: slots directly assigned via lecturer FK ───────────
+-            try:
+-                lecturer_profile = Lecturer.objects.get(user=user)
+-                assigned_slots = TimetableSlot.objects.select_related(
+-                    "unit", "program", "room", "term"
+-                ).filter(term=term, lecturer=lecturer_profile)
+-
+-                if assigned_slots.exists():
+-                    slots = TimetableSlotSerializer(assigned_slots, many=True).data
+-                    slot_source = "assigned"
+-            except Lecturer.DoesNotExist:
+-                pass
+-
+-            # ── Priority 2: match by lecturer_name_text from allocation sheet ─
+-            if not slots:
+-                full_name = user.get_full_name().strip()
+-                first_name = user.first_name.strip()
+-                last_name = user.last_name.strip()
+-
+-                from django.db.models import Q
+-                name_matched_slots = TimetableSlot.objects.select_related(
+-                    "unit", "program", "room", "term"
+-                ).filter(
+-                    term=term,
+-                    lecturer_name_text__isnull=False,
+-                ).filter(
+-                    Q(lecturer_name_text__icontains=full_name) |
+-                    Q(lecturer_name_text__icontains=last_name) |
+-                    Q(lecturer_name_text__icontains=first_name)
+-                ).exclude(lecturer_name_text='')
+-
+-                if name_matched_slots.exists():
+-                    slots = TimetableSlotSerializer(name_matched_slots, many=True).data
+-                    slot_source = "name_matched"
+-
+-                    # Auto-link the lecturer FK now that we found a match
+-                    try:
+-                        lecturer_profile = Lecturer.objects.get(user=user)
+-                    except Lecturer.DoesNotExist:
+-                        dept = name_matched_slots.first().unit.department
+-                        lecturer_profile = Lecturer.objects.create(
+-                            user=user, department=dept, title=""
+-                        )
+-                    name_matched_slots.update(lecturer=lecturer_profile)
+-
+-            # ── Priority 3: no match found ─────────────────────────────────────
+-            if not slots:
+-                slot_source = "no_match"
+-
+-        return Response({
+-            "user": UserSerializer(user).data,
+-            "current_term": str(term) if term else None,
+-            "slots": slots,
+-            "slot_source": slot_source,
+-        })
+-class LecturerStudentsView(APIView):
+-    """
+-    GET /api/v1/auth/lecturer/students/?unit=<unit_id>
+-    Returns students enrolled in a specific unit this term.
+-    
+-    In fallback mode (no lecturer assignments in timetable),
+-    any verified lecturer can query any unit.
+-    """
+-    permission_classes = [IsAuthenticated]
+-
+-    def get(self, request):
+-        from apps.timetable.models import AcademicTerm
+-        from apps.courses.models import StudentUnit
+-        from apps.core.models import Lecturer
+-
+-        user = request.user
+-        if user.role not in ["lecturer"]:
+-            return Response({"detail": "Not a lecturer account."}, status=403)
+-
+-        unit_id = request.query_params.get("unit")
+-        if not unit_id:
+-            return Response({"detail": "unit query param is required."}, status=400)
+-
+-        term = AcademicTerm.objects.filter(is_current=True).first()
+-        if not term:
+-            return Response({"detail": "No current term."}, status=400)
+-
+-        # Check if lecturer is assigned to this unit (strict mode)
+-        # If not assigned, still allow access (fallback mode)
+-        try:
+-            lecturer_profile = Lecturer.objects.get(user=user)
+-            is_assigned = TimetableSlot.objects.filter(
+-                term=term, unit_id=unit_id, lecturer=lecturer_profile
+-            ).exists()
+-        except Lecturer.DoesNotExist:
+-            is_assigned = False
+-        # In fallback mode we allow all verified lecturers to view any unit's students
+-
+-        students = StudentUnit.objects.select_related(
+-            "user", "unit"
+-        ).filter(unit_id=unit_id, term=term)
+-
+-        return Response([
+-            {
+-                "id": str(su.user.id),
+-                "name": su.user.get_full_name(),
+-                "email": su.user.email,
+-                "university_id": su.user.university_id,
+-            }
+-            for su in students
+-        ])
+diff --git a/apps/accounts/views/auth_views.py b/apps/accounts/views/auth_views.py
+index f353066..1a79a86 100644
+--- a/apps/accounts/views/auth_views.py
++++ b/apps/accounts/views/auth_views.py
+@@ -409,7 +409,9 @@ class LecturerRegisterView(APIView):
+         if len(password) < 6:
+             return Response({"detail": "Password must be at least 6 characters."}, status=400)
+ 
+-        from apps.core.models import ValidStaffID, Department, Lecturer
++        from apps.accounts.models import ValidStaffID
++        from apps.departments.models import Department
++        from apps.lecturers.models import Lecturer
+ 
+         try:
+             valid_staff = ValidStaffID.objects.get(staff_id__iexact=staff_id)
+@@ -457,7 +459,7 @@ class StaffIDUploadView(APIView):
+         import csv
+         import io
+ 
+-        from apps.core.models import ValidStaffID
++        from apps.accounts.models import ValidStaffID
+ 
+         file = request.FILES.get("file")
+         if not file:
+@@ -490,7 +492,7 @@ class StaffIDListView(APIView):
+     permission_classes = [IsAdminUser]
+ 
+     def get(self, request):
+-        from apps.core.models import ValidStaffID
++        from apps.accounts.models import ValidStaffID
+ 
+         ids = ValidStaffID.objects.all().values("staff_id", "name_hint", "is_claimed", "uploaded_at")
+         return Response(list(ids))
+@@ -502,7 +504,7 @@ class LecturerProfileView(APIView):
+     def get(self, request):
+         from apps.timetable.models import AcademicTerm, TimetableSlot
+         from apps.timetable.serializers import TimetableSlotSerializer
+-        from apps.core.models import Lecturer
++        from apps.lecturers.models import Lecturer
+ 
+         user = request.user
+         if user.role not in ["lecturer"]:
+@@ -536,7 +538,7 @@ class LecturerStudentsView(APIView):
+     def get(self, request):
+         from apps.timetable.models import AcademicTerm
+         from apps.courses.models import StudentUnit
+-        from apps.core.models import Lecturer
++        from apps.lecturers.models import Lecturer
+ 
+         user = request.user
+         if user.role not in ["lecturer"]:
+diff --git a/apps/analytics/migrations/0001_initial.py b/apps/analytics/migrations/0001_initial.py
+index 806332c..2527672 100644
+--- a/apps/analytics/migrations/0001_initial.py
++++ b/apps/analytics/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import uuid
+ from django.db import migrations, models
+diff --git a/apps/core/__init__.py b/apps/core/__init__.py
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/apps/core/admin.py b/apps/core/admin.py
+deleted file mode 100644
+index 7c59e81..0000000
+--- a/apps/core/admin.py
++++ /dev/null
+@@ -1,8 +0,0 @@
+-from django.contrib import admin
+-from .models import Department, Faculty, Lecturer, Program, Room
+-
+-admin.site.register(Faculty)
+-admin.site.register(Department)
+-admin.site.register(Program)
+-admin.site.register(Room)
+-admin.site.register(Lecturer)
+diff --git a/apps/core/apps.py b/apps/core/apps.py
+deleted file mode 100644
+index cf5226e..0000000
+--- a/apps/core/apps.py
++++ /dev/null
+@@ -1,5 +0,0 @@
+-from django.apps import AppConfig
+-
+-class CoreConfig(AppConfig):
+-    name = "apps.core"
+-    default_auto_field = "django.db.models.BigAutoField"
+diff --git a/apps/core/migrations/0001_initial.py b/apps/core/migrations/0001_initial.py
+deleted file mode 100644
+index 55aa6cb..0000000
+--- a/apps/core/migrations/0001_initial.py
++++ /dev/null
+@@ -1,83 +0,0 @@
+-# Generated by Django 5.1 on 2026-06-30 10:22
+-
+-import django.db.models.deletion
+-import uuid
+-from django.conf import settings
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    initial = True
+-
+-    dependencies = [
+-        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+-    ]
+-
+-    operations = [
+-        migrations.CreateModel(
+-            name='Faculty',
+-            fields=[
+-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ('name', models.CharField(max_length=255, unique=True)),
+-                ('code', models.CharField(max_length=30, unique=True)),
+-            ],
+-            options={
+-                'verbose_name_plural': 'Faculties',
+-                'ordering': ['name'],
+-            },
+-        ),
+-        migrations.CreateModel(
+-            name='Room',
+-            fields=[
+-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ('code', models.CharField(max_length=30, unique=True)),
+-                ('name', models.CharField(blank=True, max_length=255)),
+-                ('building', models.CharField(blank=True, max_length=100)),
+-                ('capacity', models.PositiveIntegerField(default=60)),
+-                ('room_type', models.CharField(choices=[('lecture_hall', 'Lecture Hall'), ('lab', 'Lab'), ('seminar', 'Seminar')], default='lecture_hall', max_length=20)),
+-            ],
+-            options={
+-                'ordering': ['code'],
+-            },
+-        ),
+-        migrations.CreateModel(
+-            name='Department',
+-            fields=[
+-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ('name', models.CharField(max_length=255)),
+-                ('code', models.CharField(max_length=30)),
+-                ('faculty', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='departments', to='core.faculty')),
+-            ],
+-            options={
+-                'ordering': ['name'],
+-                'unique_together': {('faculty', 'code')},
+-            },
+-        ),
+-        migrations.CreateModel(
+-            name='Lecturer',
+-            fields=[
+-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ('title', models.CharField(blank=True, max_length=50)),
+-                ('department', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='lecturers', to='core.department')),
+-                ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='lecturer_profile', to=settings.AUTH_USER_MODEL)),
+-            ],
+-            options={
+-                'ordering': ['user__last_name'],
+-            },
+-        ),
+-        migrations.CreateModel(
+-            name='Program',
+-            fields=[
+-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ('name', models.CharField(max_length=255)),
+-                ('code', models.CharField(max_length=50)),
+-                ('duration_years', models.PositiveSmallIntegerField(default=4)),
+-                ('department', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='programs', to='core.department')),
+-            ],
+-            options={
+-                'ordering': ['name'],
+-                'unique_together': {('department', 'code')},
+-            },
+-        ),
+-    ]
+diff --git a/apps/core/migrations/0002_validstaffid.py b/apps/core/migrations/0002_validstaffid.py
+deleted file mode 100644
+index c553ca5..0000000
+--- a/apps/core/migrations/0002_validstaffid.py
++++ /dev/null
+@@ -1,27 +0,0 @@
+-# Generated by Django 5.1 on 2026-07-17 20:29
+-
+-import uuid
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ('core', '0001_initial'),
+-    ]
+-
+-    operations = [
+-        migrations.CreateModel(
+-            name='ValidStaffID',
+-            fields=[
+-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ('staff_id', models.CharField(max_length=50, unique=True)),
+-                ('name_hint', models.CharField(blank=True, max_length=255)),
+-                ('is_claimed', models.BooleanField(default=False)),
+-                ('uploaded_at', models.DateTimeField(auto_now_add=True)),
+-            ],
+-            options={
+-                'ordering': ['staff_id'],
+-            },
+-        ),
+-    ]
+diff --git a/apps/core/migrations/__init__.py b/apps/core/migrations/__init__.py
+deleted file mode 100644
+index e69de29..0000000
+diff --git a/apps/core/models.py b/apps/core/models.py
+deleted file mode 100644
+index f70e1e6..0000000
+--- a/apps/core/models.py
++++ /dev/null
+@@ -1,101 +0,0 @@
+-import uuid
+-from django.db import models
+-from django.conf import settings
+-
+-
+-class Faculty(models.Model):
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-    name = models.CharField(max_length=255, unique=True)
+-    code = models.CharField(max_length=30, unique=True)
+-
+-    class Meta:
+-        ordering = ["name"]
+-        verbose_name_plural = "Faculties"
+-
+-    def __str__(self):
+-        return f"{self.name} ({self.code})"
+-
+-
+-class Department(models.Model):
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-    faculty = models.ForeignKey(Faculty, on_delete=models.PROTECT, related_name="departments")
+-    name = models.CharField(max_length=255)
+-    code = models.CharField(max_length=30)
+-
+-    class Meta:
+-        unique_together = [("faculty", "code")]
+-        ordering = ["name"]
+-
+-    def __str__(self):
+-        return f"{self.name} ({self.code})"
+-
+-
+-class Program(models.Model):
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-    department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="programs")
+-    name = models.CharField(max_length=255)
+-    code = models.CharField(max_length=50)
+-    duration_years = models.PositiveSmallIntegerField(default=4)
+-
+-    class Meta:
+-        unique_together = [("department", "code")]
+-        ordering = ["name"]
+-
+-    def __str__(self):
+-        return f"{self.name} ({self.code})"
+-
+-
+-class Room(models.Model):
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-
+-    class RoomType(models.TextChoices):
+-        LECTURE_HALL = "lecture_hall", "Lecture Hall"
+-        LAB = "lab", "Lab"
+-        SEMINAR = "seminar", "Seminar"
+-
+-    code = models.CharField(max_length=30, unique=True)
+-    name = models.CharField(max_length=255, blank=True)
+-    building = models.CharField(max_length=100, blank=True)
+-    capacity = models.PositiveIntegerField(default=60)
+-    room_type = models.CharField(max_length=20, choices=RoomType.choices, default=RoomType.LECTURE_HALL)
+-
+-    class Meta:
+-        ordering = ["code"]
+-
+-    def __str__(self):
+-        return f"{self.code} (cap:{self.capacity})"
+-
+-
+-class Lecturer(models.Model):
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-    user = models.OneToOneField(
+-        settings.AUTH_USER_MODEL,
+-        on_delete=models.CASCADE,
+-        related_name="lecturer_profile",
+-    )
+-    department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="lecturers")
+-    title = models.CharField(max_length=50, blank=True)
+-
+-    class Meta:
+-        ordering = ["user__last_name"]
+-
+-    def __str__(self):
+-        return f"{self.title} {self.user.get_full_name()}".strip()
+-        
+-        
+-class ValidStaffID(models.Model):
+-    """
+-    Pre-loaded list of valid staff IDs uploaded by admin via CSV.
+-    Lecturer registration checks against this list.
+-    """
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-    staff_id = models.CharField(max_length=50, unique=True)
+-    name_hint = models.CharField(max_length=255, blank=True)  # optional name from CSV
+-    is_claimed = models.BooleanField(default=False)  # True once a lecturer registers
+-    uploaded_at = models.DateTimeField(auto_now_add=True)
+-
+-    class Meta:
+-        ordering = ["staff_id"]
+-
+-    def __str__(self):
+-        return f"{self.staff_id} ({'claimed' if self.is_claimed else 'unclaimed'})"
+diff --git a/apps/core/serializers.py b/apps/core/serializers.py
+deleted file mode 100644
+index ced6eaa..0000000
+--- a/apps/core/serializers.py
++++ /dev/null
+@@ -1,42 +0,0 @@
+-from rest_framework import serializers
+-from .models import Department, Faculty, Lecturer, Program, Room
+-
+-
+-class FacultySerializer(serializers.ModelSerializer):
+-    class Meta:
+-        model = Faculty
+-        fields = ["id", "name", "code"]
+-
+-
+-class DepartmentSerializer(serializers.ModelSerializer):
+-    faculty_name = serializers.CharField(source="faculty.name", read_only=True)
+-
+-    class Meta:
+-        model = Department
+-        fields = ["id", "faculty", "faculty_name", "name", "code"]
+-
+-
+-class ProgramSerializer(serializers.ModelSerializer):
+-    department_name = serializers.CharField(source="department.name", read_only=True)
+-
+-    class Meta:
+-        model = Program
+-        fields = ["id", "department", "department_name", "name", "code", "duration_years"]
+-
+-
+-class RoomSerializer(serializers.ModelSerializer):
+-    class Meta:
+-        model = Room
+-        fields = ["id", "code", "name", "building", "capacity", "room_type"]
+-
+-
+-class LecturerSerializer(serializers.ModelSerializer):
+-    full_name = serializers.SerializerMethodField()
+-    department_name = serializers.CharField(source="department.name", read_only=True)
+-
+-    class Meta:
+-        model = Lecturer
+-        fields = ["id", "full_name", "department", "department_name", "title"]
+-
+-    def get_full_name(self, obj):
+-        return obj.user.get_full_name()
+diff --git a/apps/core/urls.py b/apps/core/urls.py
+deleted file mode 100644
+index 80efe4c..0000000
+--- a/apps/core/urls.py
++++ /dev/null
+@@ -1,12 +0,0 @@
+-from django.urls import include, path
+-from rest_framework.routers import DefaultRouter
+-from .views import DepartmentViewSet, FacultyViewSet, LecturerViewSet, ProgramViewSet, RoomViewSet
+-
+-router = DefaultRouter()
+-router.register("faculties", FacultyViewSet, basename="faculty")
+-router.register("departments", DepartmentViewSet, basename="department")
+-router.register("programs", ProgramViewSet, basename="program")
+-router.register("rooms", RoomViewSet, basename="room")
+-router.register("lecturers", LecturerViewSet, basename="lecturer")
+-
+-urlpatterns = [path("", include(router.urls))]
+diff --git a/apps/core/views.py b/apps/core/views.py
+deleted file mode 100644
+index 619f6eb..0000000
+--- a/apps/core/views.py
++++ /dev/null
+@@ -1,62 +0,0 @@
+-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+-from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
+-
+-from .models import Department, Faculty, Lecturer, Program, Room
+-from .serializers import (
+-    DepartmentSerializer, FacultySerializer, LecturerSerializer,
+-    ProgramSerializer, RoomSerializer,
+-)
+-
+-
+-class FacultyViewSet(ModelViewSet):
+-    queryset = Faculty.objects.all()
+-    serializer_class = FacultySerializer
+-
+-    def get_permissions(self):
+-        if self.action in ["list", "retrieve"]:
+-            return [IsAuthenticated()]
+-        return [IsAdminUser()]
+-
+-
+-class DepartmentViewSet(ModelViewSet):
+-    queryset = Department.objects.select_related("faculty").all()
+-    serializer_class = DepartmentSerializer
+-    filterset_fields = ["faculty"]
+-    search_fields = ["name", "code"]
+-
+-    def get_permissions(self):
+-        if self.action in ["list", "retrieve"]:
+-            return [IsAuthenticated()]
+-        return [IsAdminUser()]
+-
+-
+-class ProgramViewSet(ModelViewSet):
+-    queryset = Program.objects.select_related("department", "department__faculty").all()
+-    serializer_class = ProgramSerializer
+-    filterset_fields = ["department"]
+-    search_fields = ["name", "code"]
+-
+-    def get_permissions(self):
+-        if self.action in ["list", "retrieve"]:
+-            return [IsAuthenticated()]
+-        return [IsAdminUser()]
+-
+-
+-class RoomViewSet(ModelViewSet):
+-    queryset = Room.objects.all()
+-    serializer_class = RoomSerializer
+-    search_fields = ["code", "name", "building"]
+-    filterset_fields = ["room_type"]
+-
+-    def get_permissions(self):
+-        if self.action in ["list", "retrieve"]:
+-            return [IsAuthenticated()]
+-        return [IsAdminUser()]
+-
+-
+-class LecturerViewSet(ReadOnlyModelViewSet):
+-    queryset = Lecturer.objects.select_related("user", "department").all()
+-    serializer_class = LecturerSerializer
+-    filterset_fields = ["department"]
+-    search_fields = ["user__first_name", "user__last_name"]
+-    permission_classes = [IsAuthenticated]
+diff --git a/apps/courses/migrations/0001_initial.py b/apps/courses/migrations/0001_initial.py
+index c37e53f..6f80e34 100644
+--- a/apps/courses/migrations/0001_initial.py
++++ b/apps/courses/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.1 on 2026-06-30 10:22
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import django.db.models.deletion
+ import uuid
+@@ -12,6 +12,7 @@ class Migration(migrations.Migration):
+ 
+     dependencies = [
+         ('timetable', '0001_initial'),
++        ('units', '0001_initial'),
+         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+     ]
+ 
+@@ -22,7 +23,7 @@ class Migration(migrations.Migration):
+                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                 ('synced_at', models.DateTimeField(auto_now=True)),
+                 ('term', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='student_units', to='timetable.academicterm')),
+-                ('unit', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='student_registrations', to='timetable.unit')),
++                ('unit', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='student_registrations', to='units.unit')),
+                 ('user', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='student_units', to=settings.AUTH_USER_MODEL)),
+             ],
+             options={
+diff --git a/apps/courses/models.py b/apps/courses/models.py
+index ec687af..6d8ee08 100644
+--- a/apps/courses/models.py
++++ b/apps/courses/models.py
+@@ -13,7 +13,7 @@ class StudentUnit(models.Model):
+         "accounts.User", on_delete=models.CASCADE, related_name="student_units"
+     )
+     unit = models.ForeignKey(
+-        "timetable.Unit", on_delete=models.CASCADE, related_name="student_registrations"
++        "units.Unit", on_delete=models.CASCADE, related_name="student_registrations"
+     )
+     term = models.ForeignKey(
+         "timetable.AcademicTerm", on_delete=models.PROTECT, related_name="student_units"
+diff --git a/apps/curriculum/migrations/0001_initial.py b/apps/curriculum/migrations/0001_initial.py
+index c2fc955..e7e2128 100644
+--- a/apps/curriculum/migrations/0001_initial.py
++++ b/apps/curriculum/migrations/0001_initial.py
+@@ -1,196 +1,106 @@
+-from django.db import migrations, models
++# Generated by Django 5.1 on 2026-08-22 17:55
++
+ import django.db.models.deletion
+ import uuid
++from django.conf import settings
++from django.db import migrations, models
+ 
+ 
+ class Migration(migrations.Migration):
++
+     initial = True
+ 
+     dependencies = [
+-        ("accounts", "__first__"),
+-        ("departments", "__first__"),
+-        ("programs", "__first__"),
+-        ("units", "__first__"),
++        ('departments', '0001_initial'),
++        ('programs', '0001_initial'),
++        ('units', '0001_initial'),
++        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+     ]
+ 
+     operations = [
+         migrations.CreateModel(
+-            name="Curriculum",
++            name='Curriculum',
+             fields=[
+-                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ("created_at", models.DateTimeField(auto_now_add=True)),
+-                ("updated_at", models.DateTimeField(auto_now=True)),
+-                ("academic_year", models.CharField(max_length=20)),
+-                ("study_year", models.PositiveSmallIntegerField()),
+-                ("semester", models.PositiveSmallIntegerField()),
+-                ("version", models.PositiveIntegerField(default=1)),
+-                (
+-                    "status",
+-                    models.CharField(
+-                        choices=[("active", "Active"), ("inactive", "Inactive")],
+-                        default="active",
+-                        max_length=20,
+-                    ),
+-                ),
+-                (
+-                    "created_by",
+-                    models.ForeignKey(
+-                        blank=True,
+-                        null=True,
+-                        on_delete=django.db.models.deletion.SET_NULL,
+-                        related_name="created_curricula",
+-                        to="accounts.user",
+-                    ),
+-                ),
+-                (
+-                    "department",
+-                    models.ForeignKey(
+-                        on_delete=django.db.models.deletion.PROTECT,
+-                        related_name="curricula",
+-                        to="departments.department",
+-                    ),
+-                ),
+-                (
+-                    "program",
+-                    models.ForeignKey(
+-                        on_delete=django.db.models.deletion.PROTECT,
+-                        related_name="curricula",
+-                        to="programs.program",
+-                    ),
+-                ),
++                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
++                ('academic_year', models.CharField(max_length=20)),
++                ('study_year', models.PositiveSmallIntegerField()),
++                ('semester', models.PositiveSmallIntegerField()),
++                ('version', models.PositiveIntegerField(default=1)),
++                ('status', models.CharField(choices=[('active', 'Active'), ('inactive', 'Inactive')], default='active', max_length=20)),
++                ('created_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='created_curricula', to=settings.AUTH_USER_MODEL)),
++                ('department', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='curricula', to='departments.department')),
++                ('program', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='curricula', to='programs.program')),
+             ],
+             options={
+-                "ordering": [
+-                    "program__code",
+-                    "academic_year",
+-                    "study_year",
+-                    "semester",
+-                    "-version",
+-                ],
++                'ordering': ['program__code', 'academic_year', 'study_year', 'semester', '-version'],
+             },
+         ),
+         migrations.CreateModel(
+-            name="CurriculumVersion",
++            name='CurriculumUnit',
+             fields=[
+-                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ("created_at", models.DateTimeField(auto_now_add=True)),
+-                ("updated_at", models.DateTimeField(auto_now=True)),
+-                ("version", models.PositiveIntegerField()),
+-                (
+-                    "action",
+-                    models.CharField(
+-                        choices=[
+-                            ("created", "Created"),
+-                            ("activated", "Activated"),
+-                            ("deactivated", "Deactivated"),
+-                            ("updated", "Updated"),
+-                        ],
+-                        max_length=20,
+-                    ),
+-                ),
+-                ("change_summary", models.TextField(blank=True)),
+-                (
+-                    "acted_by",
+-                    models.ForeignKey(
+-                        blank=True,
+-                        null=True,
+-                        on_delete=django.db.models.deletion.SET_NULL,
+-                        related_name="curriculum_version_actions",
+-                        to="accounts.user",
+-                    ),
+-                ),
+-                (
+-                    "curriculum",
+-                    models.ForeignKey(
+-                        on_delete=django.db.models.deletion.CASCADE,
+-                        related_name="version_history",
+-                        to="curriculum.curriculum",
+-                    ),
+-                ),
++                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
++                ('is_core', models.BooleanField(default=True)),
++                ('is_elective', models.BooleanField(default=False)),
++                ('display_order', models.PositiveIntegerField(default=1)),
++                ('credit_hours', models.PositiveSmallIntegerField(default=3)),
++                ('curriculum', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='curriculum_units', to='curriculum.curriculum')),
++                ('prerequisite_unit', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='dependent_curriculum_units', to='units.unit')),
++                ('unit', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='curriculum_mappings', to='units.unit')),
+             ],
+-            options={"ordering": ["-created_at"]},
++            options={
++                'ordering': ['curriculum', 'display_order', 'unit__code'],
++            },
+         ),
+         migrations.CreateModel(
+-            name="CurriculumUnit",
++            name='CurriculumVersion',
+             fields=[
+-                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ("created_at", models.DateTimeField(auto_now_add=True)),
+-                ("updated_at", models.DateTimeField(auto_now=True)),
+-                ("is_core", models.BooleanField(default=True)),
+-                ("is_elective", models.BooleanField(default=False)),
+-                ("display_order", models.PositiveIntegerField(default=1)),
+-                ("credit_hours", models.PositiveSmallIntegerField(default=3)),
+-                (
+-                    "curriculum",
+-                    models.ForeignKey(
+-                        on_delete=django.db.models.deletion.CASCADE,
+-                        related_name="curriculum_units",
+-                        to="curriculum.curriculum",
+-                    ),
+-                ),
+-                (
+-                    "prerequisite_unit",
+-                    models.ForeignKey(
+-                        blank=True,
+-                        null=True,
+-                        on_delete=django.db.models.deletion.PROTECT,
+-                        related_name="dependent_curriculum_units",
+-                        to="units.unit",
+-                    ),
+-                ),
+-                (
+-                    "unit",
+-                    models.ForeignKey(
+-                        on_delete=django.db.models.deletion.PROTECT,
+-                        related_name="curriculum_mappings",
+-                        to="units.unit",
+-                    ),
+-                ),
++                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
++                ('version', models.PositiveIntegerField()),
++                ('action', models.CharField(choices=[('created', 'Created'), ('activated', 'Activated'), ('deactivated', 'Deactivated'), ('updated', 'Updated')], max_length=20)),
++                ('change_summary', models.TextField(blank=True)),
++                ('acted_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='curriculum_version_actions', to=settings.AUTH_USER_MODEL)),
++                ('curriculum', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='version_history', to='curriculum.curriculum')),
+             ],
+-            options={"ordering": ["curriculum", "display_order", "unit__code"]},
++            options={
++                'ordering': ['-created_at'],
++            },
+         ),
+         migrations.AddIndex(
+-            model_name="curriculum",
+-            index=models.Index(fields=["department", "status"], name="idx_curriculum_dept_status"),
++            model_name='curriculum',
++            index=models.Index(fields=['department', 'status'], name='idx_curriculum_dept_status'),
+         ),
+         migrations.AddIndex(
+-            model_name="curriculum",
+-            index=models.Index(
+-                fields=["program", "study_year", "semester"], name="idx_curriculum_program_y_s"
+-            ),
++            model_name='curriculum',
++            index=models.Index(fields=['program', 'study_year', 'semester'], name='idx_curriculum_program_y_s'),
+         ),
+         migrations.AddConstraint(
+-            model_name="curriculum",
+-            constraint=models.UniqueConstraint(
+-                fields=("program", "academic_year", "study_year", "semester", "version"),
+-                name="uq_curriculum_program_term_version",
+-            ),
++            model_name='curriculum',
++            constraint=models.UniqueConstraint(fields=('program', 'academic_year', 'study_year', 'semester', 'version'), name='uq_curriculum_program_term_version'),
+         ),
+         migrations.AddConstraint(
+-            model_name="curriculum",
+-            constraint=models.UniqueConstraint(
+-                condition=models.Q(("status", "active")),
+-                fields=("program", "academic_year", "study_year", "semester"),
+-                name="uq_curriculum_single_active_per_term",
+-            ),
++            model_name='curriculum',
++            constraint=models.UniqueConstraint(condition=models.Q(('status', 'active')), fields=('program', 'academic_year', 'study_year', 'semester'), name='uq_curriculum_single_active_per_term'),
+         ),
+         migrations.AddIndex(
+-            model_name="curriculumversion",
+-            index=models.Index(fields=["curriculum", "version"], name="idx_curriculum_version_lookup"),
+-        ),
+-        migrations.AddConstraint(
+-            model_name="curriculumunit",
+-            constraint=models.UniqueConstraint(
+-                fields=("curriculum", "unit"),
+-                name="uq_curriculumunit_curriculum_unit",
+-            ),
++            model_name='curriculumunit',
++            index=models.Index(fields=['curriculum', 'display_order'], name='idx_curriculumunit_order'),
+         ),
+         migrations.AddIndex(
+-            model_name="curriculumunit",
+-            index=models.Index(fields=["curriculum", "display_order"], name="idx_curriculumunit_order"),
++            model_name='curriculumunit',
++            index=models.Index(fields=['unit'], name='idx_curriculumunit_unit'),
++        ),
++        migrations.AddConstraint(
++            model_name='curriculumunit',
++            constraint=models.UniqueConstraint(fields=('curriculum', 'unit'), name='uq_curriculumunit_curriculum_unit'),
+         ),
+         migrations.AddIndex(
+-            model_name="curriculumunit",
+-            index=models.Index(fields=["unit"], name="idx_curriculumunit_unit"),
++            model_name='curriculumversion',
++            index=models.Index(fields=['curriculum', 'version'], name='idx_curriculum_version_lookup'),
+         ),
+-    ]
+\ No newline at end of file
++    ]
+diff --git a/apps/departments/migrations/0001_initial.py b/apps/departments/migrations/0001_initial.py
+index 256af13..c645bb3 100644
+--- a/apps/departments/migrations/0001_initial.py
++++ b/apps/departments/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import django.db.models.deletion
+ import django.utils.timezone
+diff --git a/apps/departments/urls.py b/apps/departments/urls.py
+index 65b1bcf..0f6b7d5 100644
+--- a/apps/departments/urls.py
++++ b/apps/departments/urls.py
+@@ -1,15 +1,3 @@
+-from rest_framework.routers import DefaultRouter
+-from django.urls import path, include
+-from apps.departments.views.views import FacultyViewSet, DepartmentViewSet, DepartmentAdminViewSet
+-
+-router = DefaultRouter()
+-router.register(r"faculties", FacultyViewSet, basename="faculty")
+-router.register(r"departments", DepartmentViewSet, basename="department")
+-router.register(r"department-admins", DepartmentAdminViewSet, basename="departmentadmin")
+-
+-urlpatterns = [
+-    path("", include(router.urls)),
+-]
+ from django.urls import include, path
+ from rest_framework.routers import DefaultRouter
+ 
+diff --git a/apps/enrollments/migrations/0001_initial.py b/apps/enrollments/migrations/0001_initial.py
+index 318e96d..ef2c7be 100644
+--- a/apps/enrollments/migrations/0001_initial.py
++++ b/apps/enrollments/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import django.db.models.deletion
+ import uuid
+@@ -10,7 +10,9 @@ class Migration(migrations.Migration):
+     initial = True
+ 
+     dependencies = [
+-        ('curriculum', '0001_initial'),
++        ('students', '0001_initial'),
++        ('timetable', '0001_initial'),
++        ('units', '0001_initial'),
+     ]
+ 
+     operations = [
+@@ -22,7 +24,12 @@ class Migration(migrations.Migration):
+                 ('updated_at', models.DateTimeField(auto_now=True)),
+                 ('status', models.CharField(choices=[('enrolled', 'Enrolled'), ('dropped', 'Dropped'), ('completed', 'Completed')], default='enrolled', max_length=20)),
+                 ('score', models.DecimalField(blank=True, decimal_places=2, max_digits=5, null=True)),
+-                ('curriculum_unit', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='student_enrollments', to='curriculum.curriculumunit')),
++                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='unit_enrollments', to='students.student')),
++                ('term', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='unit_enrollments', to='timetable.academicterm')),
++                ('unit', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='student_enrollments', to='units.unit')),
+             ],
++            options={
++                'unique_together': {('student', 'unit', 'term')},
++            },
+         ),
+     ]
+diff --git a/apps/enrollments/migrations/0002_initial.py b/apps/enrollments/migrations/0002_initial.py
+deleted file mode 100644
+index fc9d2ce..0000000
+--- a/apps/enrollments/migrations/0002_initial.py
++++ /dev/null
+@@ -1,22 +0,0 @@
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
+-
+-import django.db.models.deletion
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    initial = True
+-
+-    dependencies = [
+-        ('enrollments', '0001_initial'),
+-        ('students', '0001_initial'),
+-    ]
+-
+-    operations = [
+-        migrations.AddField(
+-            model_name='studentenrollment',
+-            name='student',
+-            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='unit_enrollments', to='students.student'),
+-        ),
+-    ]
+diff --git a/apps/enrollments/migrations/0003_initial.py b/apps/enrollments/migrations/0003_initial.py
+deleted file mode 100644
+index 966befa..0000000
+--- a/apps/enrollments/migrations/0003_initial.py
++++ /dev/null
+@@ -1,26 +0,0 @@
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
+-
+-import django.db.models.deletion
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    initial = True
+-
+-    dependencies = [
+-        ('enrollments', '0002_initial'),
+-        ('timetable', '0001_initial'),
+-    ]
+-
+-    operations = [
+-        migrations.AddField(
+-            model_name='studentenrollment',
+-            name='term',
+-            field=models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='unit_enrollments', to='timetable.academicterm'),
+-        ),
+-        migrations.AlterUniqueTogether(
+-            name='studentenrollment',
+-            unique_together={('student', 'curriculum_unit', 'term')},
+-        ),
+-    ]
+diff --git a/apps/enrollments/migrations/0004_alter_studentenrollment_unique_together_and_more.py b/apps/enrollments/migrations/0004_alter_studentenrollment_unique_together_and_more.py
+deleted file mode 100644
+index 7a50379..0000000
+--- a/apps/enrollments/migrations/0004_alter_studentenrollment_unique_together_and_more.py
++++ /dev/null
+@@ -1,30 +0,0 @@
+-# Generated by Django 5.2.7 on 2026-05-27 16:45
+-
+-import django.db.models.deletion
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ('enrollments', '0003_initial'),
+-        ('students', '0001_initial'),
+-        ('timetable', '0001_initial'),
+-        ('units', '0001_initial'),
+-    ]
+-
+-    operations = [
+-        migrations.AddField(
+-            model_name='studentenrollment',
+-            name='unit',
+-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='student_enrollments', to='units.unit'),
+-        ),
+-        migrations.AlterUniqueTogether(
+-            name='studentenrollment',
+-            unique_together={('student', 'unit', 'term')},
+-        ),
+-        migrations.RemoveField(
+-            model_name='studentenrollment',
+-            name='curriculum_unit',
+-        ),
+-    ]
+diff --git a/apps/lecturers/migrations/0001_initial.py b/apps/lecturers/migrations/0001_initial.py
+index e4cdfa1..bf69379 100644
+--- a/apps/lecturers/migrations/0001_initial.py
++++ b/apps/lecturers/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import django.db.models.deletion
+ import uuid
+diff --git a/apps/notifications/migrations/0001_initial.py b/apps/notifications/migrations/0001_initial.py
+index 2439ce9..0677cc2 100644
+--- a/apps/notifications/migrations/0001_initial.py
++++ b/apps/notifications/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.1 on 2026-07-06 12:27
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import django.db.models.deletion
+ import uuid
+@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
+     initial = True
+ 
+     dependencies = [
+-        ('core', '0001_initial'),
++        ('programs', '0001_initial'),
+         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+     ]
+ 
+@@ -41,7 +41,7 @@ class Migration(migrations.Migration):
+                 ('recipients_count', models.PositiveIntegerField(default=0)),
+                 ('sent_at', models.DateTimeField(auto_now_add=True)),
+                 ('sent_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='sent_notifications', to=settings.AUTH_USER_MODEL)),
+-                ('target_program', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='notifications', to='core.program')),
++                ('target_program', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='notifications', to='programs.program')),
+             ],
+             options={
+                 'ordering': ['-sent_at'],
+diff --git a/apps/notifications/models.py b/apps/notifications/models.py
+index 9724a19..b2d7a5f 100644
+--- a/apps/notifications/models.py
++++ b/apps/notifications/models.py
+@@ -60,7 +60,7 @@ class Notification(models.Model):
+     )
+     target = models.CharField(max_length=20, choices=Target.choices, default=Target.ALL)
+     target_program = models.ForeignKey(
+-        "core.Program", on_delete=models.SET_NULL,
++        "programs.Program", on_delete=models.SET_NULL,
+         null=True, blank=True, related_name="notifications",
+     )
+     target_year = models.PositiveSmallIntegerField(null=True, blank=True)
+diff --git a/apps/notifications/views.py b/apps/notifications/views.py
+index 34a7357..ba01ed6 100644
+--- a/apps/notifications/views.py
++++ b/apps/notifications/views.py
+@@ -6,7 +6,7 @@ from rest_framework.response import Response
+ from rest_framework.views import APIView
+ 
+ from apps.accounts.models import User
+-from apps.core.models import Program
++from apps.programs.models import Program
+ from apps.courses.models import StudentUnit
+ 
+ from .fcm_service import send_to_tokens
+diff --git a/apps/programs/migrations/0001_initial.py b/apps/programs/migrations/0001_initial.py
+index 70aa648..f90ac22 100644
+--- a/apps/programs/migrations/0001_initial.py
++++ b/apps/programs/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import django.db.models.deletion
+ import django.utils.timezone
+diff --git a/apps/programs/urls.py b/apps/programs/urls.py
+index fd99a99..242c5a4 100644
+--- a/apps/programs/urls.py
++++ b/apps/programs/urls.py
+@@ -1,11 +1,3 @@
+-from rest_framework.routers import DefaultRouter
+-from django.urls import path, include
+-from apps.programs.views.views import ProgramViewSet
+-
+-router = DefaultRouter()
+-router.register(r"programs", ProgramViewSet, basename="program")
+-
+-urlpatterns = [path("", include(router.urls))]
+ from django.urls import include, path
+ from rest_framework.routers import DefaultRouter
+ 
+diff --git a/apps/rooms/migrations/0001_initial.py b/apps/rooms/migrations/0001_initial.py
+index 27d2f80..e005814 100644
+--- a/apps/rooms/migrations/0001_initial.py
++++ b/apps/rooms/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import uuid
+ from django.db import migrations, models
+diff --git a/apps/students/migrations/0001_initial.py b/apps/students/migrations/0001_initial.py
+index e2da569..d399275 100644
+--- a/apps/students/migrations/0001_initial.py
++++ b/apps/students/migrations/0001_initial.py
+@@ -1,5 +1,4 @@
+-
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import django.core.validators
+ import django.db.models.deletion
+diff --git a/apps/students/urls/urls.py b/apps/students/urls/urls.py
+deleted file mode 100644
+index b08152b..0000000
+--- a/apps/students/urls/urls.py
++++ /dev/null
+@@ -1,31 +0,0 @@
+-"""
+-Student API URL routing.
+-
+-Configures all endpoints for the students module.
+-"""
+-
+-from django.urls import path, include
+-from rest_framework.routers import DefaultRouter
+-
+-from apps.students.views import (
+-    StudentViewSet,
+-    StudentProfileUpdateView,
+-    AcademicProgressViewSet,
+-    StudentEnrollmentViewSet,
+-)
+-
+-app_name = 'students'
+-
+-# Register viewsets with router
+-router = DefaultRouter()
+-router.register(r'students', StudentViewSet, basename='student')
+-router.register(r'academic-progress', AcademicProgressViewSet, basename='academic-progress')
+-router.register(r'enrollments', StudentEnrollmentViewSet, basename='enrollment')
+-
+-urlpatterns = [
+-    # Router URLs
+-    path('', include(router.urls)),
+-
+-    # Additional custom endpoints
+-    path('profile/me/update/', StudentProfileUpdateView.as_view(), name='profile-update'),
+-]
+diff --git a/apps/timetable/admin.py b/apps/timetable/admin.py
+index 2771e0a..2020516 100644
+--- a/apps/timetable/admin.py
++++ b/apps/timetable/admin.py
+@@ -8,6 +8,6 @@ class AcademicTermAdmin(admin.ModelAdmin):
+ 
+ @admin.register(TimetableSlot)
+ class TimetableSlotAdmin(admin.ModelAdmin):
+-    list_display = ["unit", "program", "year_of_study", "day", "start_time", "end_time", "room", "term"]
+-    list_filter = ["term", "day", "program"]
++    list_display = ["unit", "program", "year_of_study", "day_of_week", "start_time", "end_time", "room", "term"]
++    list_filter = ["term", "day_of_week", "program"]
+     search_fields = ["unit__code", "unit__name"]
+diff --git a/apps/timetable/migrations/0001_initial.py b/apps/timetable/migrations/0001_initial.py
+index 73279cf..339f182 100644
+--- a/apps/timetable/migrations/0001_initial.py
++++ b/apps/timetable/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.1 on 2026-06-30 10:22
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import django.db.models.deletion
+ import uuid
+@@ -11,7 +11,11 @@ class Migration(migrations.Migration):
+     initial = True
+ 
+     dependencies = [
+-        ('core', '0001_initial'),
++        ('departments', '0001_initial'),
++        ('lecturers', '0001_initial'),
++        ('programs', '0001_initial'),
++        ('rooms', '0001_initial'),
++        ('units', '0001_initial'),
+         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+     ]
+ 
+@@ -20,6 +24,8 @@ class Migration(migrations.Migration):
+             name='AcademicTerm',
+             fields=[
+                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
+                 ('academic_year', models.CharField(max_length=20)),
+                 ('semester', models.PositiveSmallIntegerField()),
+                 ('start_date', models.DateField()),
+@@ -32,55 +38,118 @@ class Migration(migrations.Migration):
+             },
+         ),
+         migrations.CreateModel(
+-            name='TimetableUpload',
++            name='TimeSlot',
+             fields=[
+                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ('uploaded_file', models.FileField(upload_to='timetable_uploads/%Y/%m/')),
+-                ('status', models.CharField(choices=[('received', 'Received'), ('processing', 'Processing'), ('done', 'Done'), ('partial', 'Partial — some rows failed'), ('failed', 'Failed')], default='received', max_length=20)),
+-                ('rows_received', models.PositiveIntegerField(default=0)),
+-                ('rows_saved', models.PositiveIntegerField(default=0)),
+-                ('rows_failed', models.PositiveIntegerField(default=0)),
+-                ('errors', models.JSONField(blank=True, default=list)),
+-                ('uploaded_at', models.DateTimeField(auto_now_add=True)),
+-                ('processed_at', models.DateTimeField(blank=True, null=True)),
+-                ('term', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='uploads', to='timetable.academicterm')),
+-                ('uploaded_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='timetable_uploads', to=settings.AUTH_USER_MODEL)),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
++                ('start_time', models.TimeField(help_text='Session start time (e.g., 08:00)')),
++                ('end_time', models.TimeField(help_text='Session end time (e.g., 10:00)')),
++                ('slot_name', models.CharField(help_text='Descriptive name (e.g., Morning Slot 1, Afternoon Session)', max_length=255)),
++                ('duration_minutes', models.PositiveSmallIntegerField(help_text='Duration of slot in minutes')),
++                ('status', models.CharField(choices=[('active', 'Active'), ('inactive', 'Inactive'), ('archived', 'Archived')], default='active', help_text='Current operational status', max_length=20)),
++                ('description', models.TextField(blank=True, help_text='Additional details about this time slot')),
+             ],
+             options={
+-                'ordering': ['-uploaded_at'],
++                'verbose_name': 'Time Slot',
++                'verbose_name_plural': 'Time Slots',
++                'db_table': 'timetable_timeslot',
++                'ordering': ['start_time'],
++                'indexes': [models.Index(fields=['start_time'], name='timetable_t_start_t_718626_idx'), models.Index(fields=['status'], name='timetable_t_status_4d003d_idx')],
++                'unique_together': {('start_time', 'end_time')},
+             },
+         ),
+         migrations.CreateModel(
+-            name='Unit',
++            name='TimetableSlot',
+             fields=[
+                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ('code', models.CharField(max_length=30)),
+-                ('name', models.CharField(max_length=255)),
+-                ('credit_hours', models.PositiveSmallIntegerField(default=3)),
+-                ('department', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='units', to='core.department')),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
++                ('year_of_study', models.PositiveSmallIntegerField(default=1)),
++                ('day_of_week', models.CharField(choices=[('mon', 'Monday'), ('tue', 'Tuesday'), ('wed', 'Wednesday'), ('thu', 'Thursday'), ('fri', 'Friday'), ('sat', 'Saturday')], max_length=10)),
++                ('start_time', models.TimeField()),
++                ('end_time', models.TimeField()),
++                ('class_group', models.CharField(default='MAIN', max_length=50)),
++                ('lecturer', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='teaching_slots', to='lecturers.lecturer')),
++                ('program', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='timetable_slots', to='programs.program')),
++                ('room', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='scheduled_slots', to='rooms.room')),
++                ('term', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='slots', to='timetable.academicterm')),
++                ('unit', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='timetable_slots', to='units.unit')),
+             ],
+             options={
+-                'ordering': ['code'],
+-                'unique_together': {('department', 'code')},
++                'ordering': ['term', 'day_of_week', 'start_time'],
+             },
+         ),
+         migrations.CreateModel(
+-            name='TimetableSlot',
++            name='TimetableConflict',
+             fields=[
+                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+-                ('year_of_study', models.PositiveSmallIntegerField(default=1)),
+-                ('day', models.CharField(choices=[('MON', 'Monday'), ('TUE', 'Tuesday'), ('WED', 'Wednesday'), ('THU', 'Thursday'), ('FRI', 'Friday'), ('SAT', 'Saturday')], max_length=3)),
+-                ('start_time', models.TimeField()),
+-                ('end_time', models.TimeField()),
+-                ('lecturer', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='teaching_slots', to='core.lecturer')),
+-                ('program', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='timetable_slots', to='core.program')),
+-                ('room', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='scheduled_slots', to='core.room')),
+-                ('term', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='slots', to='timetable.academicterm')),
+-                ('unit', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='slots', to='timetable.unit')),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
++                ('conflict_type', models.CharField(choices=[('room', 'Room Conflict'), ('lecturer', 'Lecturer Conflict'), ('program', 'Program Conflict')], max_length=20)),
++                ('details', models.JSONField(blank=True, default=dict)),
++                ('term', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='timetable.academicterm')),
++                ('slot_a', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='conflicts_as_primary', to='timetable.timetableslot')),
++                ('slot_b', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='conflicts_as_secondary', to='timetable.timetableslot')),
++            ],
++            options={
++                'abstract': False,
++            },
++        ),
++        migrations.CreateModel(
++            name='TimetableUploadBatch',
++            fields=[
++                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
++                ('source_file', models.FileField(upload_to='timetable_uploads/%Y/%m/%d')),
++                ('status', models.CharField(choices=[('received', 'Received'), ('validated', 'Validated'), ('failed', 'Failed'), ('processed', 'Processed')], default='received', max_length=20)),
++                ('rows_received', models.PositiveIntegerField(default=0)),
++                ('rows_saved', models.PositiveIntegerField(default=0)),
++                ('validation_errors', models.JSONField(blank=True, default=list)),
++                ('uploaded_by', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='timetable_upload_batches', to=settings.AUTH_USER_MODEL)),
++            ],
++            options={
++                'abstract': False,
++            },
++        ),
++        migrations.AddField(
++            model_name='timetableslot',
++            name='upload_batch',
++            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='slots', to='timetable.timetableuploadbatch'),
++        ),
++        migrations.CreateModel(
++            name='TimetableSession',
++            fields=[
++                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
++                ('created_at', models.DateTimeField(auto_now_add=True)),
++                ('updated_at', models.DateTimeField(auto_now=True)),
++                ('academic_year', models.CharField(help_text='Academic year (e.g., 2024/2025)', max_length=10)),
++                ('study_year', models.PositiveSmallIntegerField(choices=[(1, '1'), (2, '2'), (3, '3'), (4, '4'), (5, '5')], help_text='Year of study (1-5)')),
++                ('semester', models.PositiveSmallIntegerField(choices=[(1, 'Semester 1'), (2, 'Semester 2')], help_text='Semester (1 or 2)')),
++                ('day_of_week', models.CharField(choices=[('MON', 'Monday'), ('TUE', 'Tuesday'), ('WED', 'Wednesday'), ('THU', 'Thursday'), ('FRI', 'Friday'), ('SAT', 'Saturday'), ('SUN', 'Sunday')], help_text='Day when class occurs', max_length=3)),
++                ('session_type', models.CharField(choices=[('lecture', 'Lecture'), ('practical', 'Practical/Lab'), ('tutorial', 'Tutorial'), ('seminar', 'Seminar'), ('workshop', 'Workshop'), ('project', 'Project'), ('field_work', 'Field Work')], default='lecture', help_text='Type of teaching session', max_length=20)),
++                ('delivery_mode', models.CharField(choices=[('face_to_face', 'Face-to-Face'), ('online', 'Online'), ('hybrid', 'Hybrid'), ('blended', 'Blended')], default='face_to_face', help_text='How session is delivered', max_length=20)),
++                ('student_group', models.CharField(blank=True, help_text='Student group/cohort identifier (e.g., Group A, Set 1)', max_length=100)),
++                ('max_students', models.PositiveSmallIntegerField(help_text='Maximum number of students for this session')),
++                ('current_enrollment', models.PositiveSmallIntegerField(default=0, help_text='Current enrolled students')),
++                ('status', models.CharField(choices=[('scheduled', 'Scheduled'), ('active', 'Active'), ('completed', 'Completed'), ('cancelled', 'Cancelled'), ('suspended', 'Suspended')], default='scheduled', help_text='Current session status', max_length=20)),
++                ('notes', models.TextField(blank=True, help_text='Additional notes or instructions for the session')),
++                ('created_by', models.ForeignKey(blank=True, help_text='User who created this session', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='created_timetable_sessions', to=settings.AUTH_USER_MODEL)),
++                ('department', models.ForeignKey(help_text='Department offering this session', on_delete=django.db.models.deletion.CASCADE, related_name='timetable_sessions', to='departments.department')),
++                ('lecturer', models.ForeignKey(blank=True, help_text='Lecturer assigned to teach this session', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='timetable_sessions', to='lecturers.lecturer')),
++                ('program', models.ForeignKey(help_text='Program this session is offered under (enables filtering)', on_delete=django.db.models.deletion.CASCADE, related_name='timetable_sessions', to='programs.program')),
++                ('room', models.ForeignKey(blank=True, help_text='Room/venue where session occurs', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='timetable_sessions', to='rooms.room')),
++                ('time_slot', models.ForeignKey(help_text='Time slot for this session', on_delete=django.db.models.deletion.PROTECT, related_name='timetable_sessions', to='timetable.timeslot')),
++                ('unit', models.ForeignKey(help_text='Unit/course being taught in this session', on_delete=django.db.models.deletion.CASCADE, related_name='timetable_sessions', to='units.unit')),
+             ],
+             options={
+-                'ordering': ['term', 'day', 'start_time'],
+-                'indexes': [models.Index(fields=['term', 'unit'], name='timetable_t_term_id_a5e6a0_idx'), models.Index(fields=['term', 'program', 'year_of_study'], name='timetable_t_term_id_45e4d1_idx'), models.Index(fields=['day', 'start_time'], name='timetable_t_day_8f8ffb_idx')],
++                'verbose_name': 'Timetable Session',
++                'verbose_name_plural': 'Timetable Sessions',
++                'db_table': 'timetable_session',
++                'ordering': ['day_of_week', 'time_slot__start_time'],
++                'indexes': [models.Index(fields=['academic_year', 'semester'], name='timetable_s_academi_71f0ff_idx'), models.Index(fields=['program', 'study_year', 'semester'], name='timetable_s_program_3951c7_idx'), models.Index(fields=['department', 'day_of_week'], name='timetable_s_departm_bd74eb_idx'), models.Index(fields=['lecturer', 'day_of_week'], name='timetable_s_lecture_d1b0b7_idx'), models.Index(fields=['room', 'day_of_week'], name='timetable_s_room_id_7795dd_idx'), models.Index(fields=['day_of_week', 'time_slot'], name='timetable_s_day_of__58838d_idx'), models.Index(fields=['status'], name='timetable_s_status_0af423_idx'), models.Index(fields=['unit'], name='timetable_s_unit_id_a741b5_idx')],
++                'unique_together': {('unit', 'program', 'study_year', 'semester', 'day_of_week', 'time_slot', 'student_group', 'academic_year')},
+             },
+         ),
+     ]
+diff --git a/apps/timetable/migrations/0002_remove_timetableslot_curriculum_unit_and_more.py b/apps/timetable/migrations/0002_remove_timetableslot_curriculum_unit_and_more.py
+deleted file mode 100644
+index dadd208..0000000
+--- a/apps/timetable/migrations/0002_remove_timetableslot_curriculum_unit_and_more.py
++++ /dev/null
+@@ -1,14 +0,0 @@
+-# Generated by Django 5.2.7 on 2026-05-27 16:45
+-
+-from django.db import migrations
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ('programs', '0001_initial'),
+-        ('timetable', '0001_initial'),
+-        ('units', '0001_initial'),
+-    ]
+-
+-    operations = []
+diff --git a/apps/timetable/migrations/0002_timetableslot_lecturer_name_text.py b/apps/timetable/migrations/0002_timetableslot_lecturer_name_text.py
+deleted file mode 100644
+index fcd57af..0000000
+--- a/apps/timetable/migrations/0002_timetableslot_lecturer_name_text.py
++++ /dev/null
+@@ -1,18 +0,0 @@
+-# Generated by Django 5.1 on 2026-07-21 13:04
+-
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ('timetable', '0001_initial'),
+-    ]
+-
+-    operations = [
+-        migrations.AddField(
+-            model_name='timetableslot',
+-            name='lecturer_name_text',
+-            field=models.CharField(blank=True, max_length=255),
+-        ),
+-    ]
+diff --git a/apps/timetable/migrations/0003_merge_20260821_1317.py b/apps/timetable/migrations/0003_merge_20260821_1317.py
+deleted file mode 100644
+index 78913e0..0000000
+--- a/apps/timetable/migrations/0003_merge_20260821_1317.py
++++ /dev/null
+@@ -1,14 +0,0 @@
+-# Generated by Django 5.1 on 2026-08-21 10:17
+-
+-from django.db import migrations
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ('timetable', '0002_remove_timetableslot_curriculum_unit_and_more'),
+-        ('timetable', '0002_timetableslot_lecturer_name_text'),
+-    ]
+-
+-    operations = [
+-    ]
+diff --git a/apps/timetable/models.py b/apps/timetable/models.py
+deleted file mode 100644
+index 3b03ead..0000000
+--- a/apps/timetable/models.py
++++ /dev/null
+@@ -1,119 +0,0 @@
+-import uuid
+-from django.db import models
+-
+-
+-class AcademicTerm(models.Model):
+-    """A semester/term in the academic calendar."""
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-    academic_year = models.CharField(max_length=20)   # e.g. "2025/2026"
+-    semester = models.PositiveSmallIntegerField()      # 1 or 2
+-    start_date = models.DateField()
+-    end_date = models.DateField()
+-    is_current = models.BooleanField(default=False)
+-
+-    class Meta:
+-        unique_together = [("academic_year", "semester")]
+-        ordering = ["-academic_year", "-semester"]
+-
+-    def __str__(self):
+-        return f"{self.academic_year} Sem {self.semester}"
+-
+-
+-class Unit(models.Model):
+-    """A course unit offered by a department."""
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-    code = models.CharField(max_length=30)       # e.g. "COSC 328"
+-    name = models.CharField(max_length=255)
+-    department = models.ForeignKey(
+-        "core.Department", on_delete=models.PROTECT, related_name="units"
+-    )
+-    credit_hours = models.PositiveSmallIntegerField(default=3)
+-
+-    class Meta:
+-        unique_together = [("department", "code")]
+-        ordering = ["code"]
+-
+-    def __str__(self):
+-        return f"{self.code} — {self.name}"
+-
+-
+-class TimetableSlot(models.Model):
+-    """
+-    One row in the master timetable.
+-    Represents a scheduled class: what unit, when, where, taught by whom,
+-    for which program/year.
+-    Admin populates this by uploading an Excel file.
+-    """
+-
+-    class Day(models.TextChoices):
+-        MON = "MON", "Monday"
+-        TUE = "TUE", "Tuesday"
+-        WED = "WED", "Wednesday"
+-        THU = "THU", "Thursday"
+-        FRI = "FRI", "Friday"
+-        SAT = "SAT", "Saturday"
+-
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-    term = models.ForeignKey(AcademicTerm, on_delete=models.PROTECT, related_name="slots")
+-    unit = models.ForeignKey(Unit, on_delete=models.PROTECT, related_name="slots")
+-    lecturer_name_text = models.CharField(max_length=255, blank=True)
+-    program = models.ForeignKey(
+-        "core.Program", on_delete=models.PROTECT, related_name="timetable_slots"
+-    )
+-    year_of_study = models.PositiveSmallIntegerField(default=1)
+-    lecturer = models.ForeignKey(
+-        "core.Lecturer", on_delete=models.SET_NULL,
+-        null=True, blank=True, related_name="teaching_slots",
+-    )
+-    room = models.ForeignKey(
+-        "core.Room", on_delete=models.SET_NULL,
+-        null=True, blank=True, related_name="scheduled_slots",
+-    )
+-    day = models.CharField(max_length=3, choices=Day.choices)
+-    start_time = models.TimeField()
+-    end_time = models.TimeField()
+-
+-    class Meta:
+-        ordering = ["term", "day", "start_time"]
+-        indexes = [
+-            models.Index(fields=["term", "unit"]),
+-            models.Index(fields=["term", "program", "year_of_study"]),
+-            models.Index(fields=["day", "start_time"]),
+-        ]
+-
+-    def __str__(self):
+-        return f"{self.unit.code} {self.day} {self.start_time:%H:%M}"
+-
+-
+-class TimetableUpload(models.Model):
+-    """Audit record for each Excel file uploaded by admin."""
+-
+-    class Status(models.TextChoices):
+-        RECEIVED = "received", "Received"
+-        PROCESSING = "processing", "Processing"
+-        DONE = "done", "Done"
+-        PARTIAL = "partial", "Partial — some rows failed"
+-        FAILED = "failed", "Failed"
+-
+-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+-    uploaded_by = models.ForeignKey(
+-        "accounts.User", on_delete=models.PROTECT, related_name="timetable_uploads"
+-    )
+-    uploaded_file = models.FileField(upload_to="timetable_uploads/%Y/%m/")
+-    term = models.ForeignKey(
+-        AcademicTerm, on_delete=models.PROTECT,
+-        null=True, blank=True, related_name="uploads",
+-    )
+-    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RECEIVED)
+-    rows_received = models.PositiveIntegerField(default=0)
+-    rows_saved = models.PositiveIntegerField(default=0)
+-    rows_failed = models.PositiveIntegerField(default=0)
+-    errors = models.JSONField(default=list, blank=True)
+-    uploaded_at = models.DateTimeField(auto_now_add=True)
+-    processed_at = models.DateTimeField(null=True, blank=True)
+-
+-    class Meta:
+-        ordering = ["-uploaded_at"]
+-
+-    def __str__(self):
+-        return f"Upload by {self.uploaded_by} at {self.uploaded_at:%Y-%m-%d %H:%M} ({self.status})"
+diff --git a/apps/timetable/serializers.py b/apps/timetable/serializers.py
+deleted file mode 100644
+index 8cc15c2..0000000
+--- a/apps/timetable/serializers.py
++++ /dev/null
+@@ -1,55 +0,0 @@
+-from rest_framework import serializers
+-from .models import AcademicTerm, TimetableSlot, TimetableUpload, Unit
+-
+-
+-class AcademicTermSerializer(serializers.ModelSerializer):
+-    class Meta:
+-        model = AcademicTerm
+-        fields = ["id", "academic_year", "semester", "start_date", "end_date", "is_current"]
+-
+-
+-class UnitSerializer(serializers.ModelSerializer):
+-    department_name = serializers.CharField(source="department.name", read_only=True)
+-
+-    class Meta:
+-        model = Unit
+-        fields = ["id", "code", "name", "department", "department_name", "credit_hours"]
+-
+-
+-class TimetableSlotSerializer(serializers.ModelSerializer):
+-    unit_code = serializers.CharField(source="unit.code", read_only=True)
+-    unit_name = serializers.CharField(source="unit.name", read_only=True)
+-    program_name = serializers.CharField(source="program.name", read_only=True)
+-    room_code = serializers.CharField(source="room.code", read_only=True, default=None)
+-    lecturer_name = serializers.SerializerMethodField()
+-    term_label = serializers.CharField(source="term.__str__", read_only=True)
+-
+-    class Meta:
+-        model = TimetableSlot
+-        fields = [
+-            "id", "term", "term_label", "unit", "unit_code", "unit_name",
+-            "program", "program_name", "year_of_study",
+-            "lecturer", "lecturer_name", "room", "room_code",
+-            "day", "start_time", "end_time", "lecturer_name_text",
+-        ]
+-
+-    def get_lecturer_name(self, obj):
+-        if obj.lecturer:
+-            return obj.lecturer.user.get_full_name()
+-        return obj.lecturer_name_text or None
+-
+-
+-class TimetableUploadSerializer(serializers.ModelSerializer):
+-    uploaded_by_name = serializers.CharField(source="uploaded_by.get_full_name", read_only=True)
+-
+-    class Meta:
+-        model = TimetableUpload
+-        fields = [
+-            "id", "uploaded_by", "uploaded_by_name", "uploaded_file",
+-            "term", "status", "rows_received", "rows_saved", "rows_failed",
+-            "errors", "uploaded_at", "processed_at",
+-        ]
+-        read_only_fields = [
+-            "uploaded_by", "status", "rows_received", "rows_saved",
+-            "rows_failed", "errors", "uploaded_at", "processed_at",
+-        ]
+diff --git a/apps/timetable/services/mapper.py b/apps/timetable/services/mapper.py
+index 781c417..1353cd1 100644
+--- a/apps/timetable/services/mapper.py
++++ b/apps/timetable/services/mapper.py
+@@ -8,7 +8,10 @@ from __future__ import annotations
+ import re
+ from django.db.models import Q
+ 
+-from apps.core.models import Department, Faculty, Lecturer, Program, Room
++from apps.departments.models import Department, Faculty
++from apps.lecturers.models import Lecturer
++from apps.programs.models import Program
++from apps.rooms.models import Room
+ from apps.timetable.models import Unit
+ 
+ 
+diff --git a/apps/timetable/views.py b/apps/timetable/views.py
+deleted file mode 100644
+index 208b5ac..0000000
+--- a/apps/timetable/views.py
++++ /dev/null
+@@ -1,268 +0,0 @@
+-from rest_framework import status
+-from rest_framework.generics import DestroyAPIView, ListAPIView, RetrieveAPIView
+-from rest_framework.parsers import MultiPartParser
+-from rest_framework.permissions import IsAdminUser, IsAuthenticated
+-from rest_framework.response import Response
+-from rest_framework.views import APIView
+-from rest_framework.viewsets import ReadOnlyModelViewSet
+-
+-from .models import AcademicTerm, TimetableSlot, TimetableUpload, Unit
+-from .serializers import (
+-    AcademicTermSerializer, TimetableSlotSerializer,
+-    TimetableUploadSerializer, UnitSerializer,
+-)
+-from .services.upload_service import process_upload
+-
+-
+-class AcademicTermViewSet(ReadOnlyModelViewSet):
+-    queryset = AcademicTerm.objects.all()
+-    serializer_class = AcademicTermSerializer
+-    permission_classes = [IsAuthenticated]
+-
+-
+-class UnitViewSet(ReadOnlyModelViewSet):
+-    queryset = Unit.objects.select_related("department").all()
+-    serializer_class = UnitSerializer
+-    permission_classes = [IsAuthenticated]
+-    filterset_fields = ["department"]
+-    search_fields = ["code", "name"]
+-
+-
+-class TimetableSlotListView(ListAPIView):
+-    """Read-only master timetable — filterable by term, program, day."""
+-    serializer_class = TimetableSlotSerializer
+-    permission_classes = [IsAuthenticated]
+-    filterset_fields = ["term", "program", "day", "year_of_study"]
+-
+-    def get_queryset(self):
+-        return TimetableSlot.objects.select_related(
+-            "term", "unit", "program", "lecturer__user", "room"
+-        ).all()
+-
+-
+-class TimetableUploadView(APIView):
+-    """
+-    POST /api/v1/timetable/upload/
+-    Admin uploads an Excel file. Processing happens synchronously.
+-    """
+-    permission_classes = [IsAdminUser]
+-    parser_classes = [MultiPartParser]
+-
+-    def post(self, request):
+-        file = request.FILES.get("file")
+-        if not file:
+-            return Response({"detail": "No file provided."}, status=400)
+-
+-        ext = file.name.rsplit(".", 1)[-1].lower()
+-        if ext not in ("xlsx", "xls", "csv", "pdf", "docx"):
+-            return Response(
+-                {"detail": "Only .xlsx, .xls, .csv, .pdf, or .docx files are accepted."},
+-                status=400,
+-            )
+-
+-        upload = TimetableUpload.objects.create(
+-            uploaded_by=request.user,
+-            uploaded_file=file,
+-        )
+-        try:
+-            upload = process_upload(upload)
+-        except ImportError:
+-            return Response(
+-                {"detail": "PDF support is not installed on the server."},
+-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+-            )
+-        return Response(TimetableUploadSerializer(upload).data, status=status.HTTP_201_CREATED)
+-
+-
+-class TimetableUploadDetailView(RetrieveAPIView):
+-    queryset = TimetableUpload.objects.all()
+-    serializer_class = TimetableUploadSerializer
+-    permission_classes = [IsAdminUser]
+-    lookup_field = "pk"
+-
+-
+-class TimetableUploadListView(ListAPIView):
+-    """GET /api/v1/timetable/upload/list/ — list all uploads, newest first."""
+-    queryset = TimetableUpload.objects.select_related("uploaded_by", "term").all()
+-    serializer_class = TimetableUploadSerializer
+-    permission_classes = [IsAdminUser]
+-
+-
+-class TimetableUploadDeleteView(DestroyAPIView):
+-    """
+-    DELETE /api/v1/timetable/upload/<uuid:pk>/delete/
+-    Deletes the upload record. Does NOT delete the TimetableSlot rows it created
+-    (those are shared/deduped across uploads via update_or_create) — only removes
+-    the audit record. To clear slots for a term, use the term-clear endpoint instead.
+-    """
+-    queryset = TimetableUpload.objects.all()
+-    permission_classes = [IsAdminUser]
+-    lookup_field = "pk"
+-
+-
+-class AcademicTermSetCurrentView(APIView):
+-    """
+-    POST /api/v1/timetable/terms/<uuid:pk>/set-current/
+-    Marks this term as current, unmarking all others.
+-    """
+-    permission_classes = [IsAdminUser]
+-
+-    def post(self, request, pk):
+-        try:
+-            term = AcademicTerm.objects.get(pk=pk)
+-        except AcademicTerm.DoesNotExist:
+-            return Response({"detail": "Term not found."}, status=status.HTTP_404_NOT_FOUND)
+-
+-        AcademicTerm.objects.filter(is_current=True).update(is_current=False)
+-        term.is_current = True
+-        term.save(update_fields=["is_current"])
+-        return Response({"detail": f"{term} is now the current term."})
+-
+-
+-class TimetableSlotsClearView(APIView):
+-    """
+-    DELETE /api/v1/timetable/terms/<uuid:pk>/clear-slots/
+-    Deletes all TimetableSlot rows for a given term — useful before re-uploading
+-    a corrected file for the same term.
+-    """
+-    permission_classes = [IsAdminUser]
+-
+-    def delete(self, request, pk):
+-        try:
+-            term = AcademicTerm.objects.get(pk=pk)
+-        except AcademicTerm.DoesNotExist:
+-            return Response({"detail": "Term not found."}, status=status.HTTP_404_NOT_FOUND)
+-
+-        deleted_count, _ = TimetableSlot.objects.filter(term=term).delete()
+-        return Response({"detail": f"Deleted {deleted_count} slot(s) for {term}."})
+-        
+-"""
+-POST /api/v1/timetable/assign-lecturers/
+-
+-Admin uploads the department allocation DOCX.
+-For each row:
+-  1. Find Unit by normalised unit_code
+-  2. Find or create Lecturer record by phone/name
+-  3. Update all TimetableSlot records for that unit in current term
+-  4. Add lecturer_name_text so students see name even before lecturer registers
+-
+-Also adds lecturer_name_text field to TimetableSlot (migration needed).
+-"""
+-import os
+-import re
+-import tempfile
+-
+-from rest_framework.parsers import MultiPartParser
+-from rest_framework.permissions import IsAdminUser
+-from rest_framework.response import Response
+-from rest_framework.views import APIView
+-
+-from apps.timetable.models import AcademicTerm, TimetableSlot, Unit
+-
+-
+-def _normalise_code(code: str) -> str:
+-    return re.sub(r'\s+', '', code.upper().strip())
+-
+-
+-class AssignLecturersView(APIView):
+-    """
+-    POST /api/v1/timetable/assign-lecturers/
+-    Upload the department allocation DOCX to map lecturers to units.
+-    Accepts: .docx files only.
+-    """
+-    permission_classes = [IsAdminUser]
+-    parser_classes = [MultiPartParser]
+-
+-    def post(self, request):
+-        file = request.FILES.get("file")
+-        if not file:
+-            return Response({"detail": "No file provided."}, status=400)
+-
+-        ext = file.name.rsplit(".", 1)[-1].lower()
+-        if ext != "docx":
+-            return Response({"detail": "Only .docx files are accepted."}, status=400)
+-
+-        # Save to temp file so python-docx can open it
+-        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+-            for chunk in file.chunks():
+-                tmp.write(chunk)
+-            tmp_path = tmp.name
+-
+-        try:
+-            from apps.timetable.services.allocation_parser import parse_allocation_docx
+-            rows = parse_allocation_docx(tmp_path)
+-        except Exception as exc:
+-            os.unlink(tmp_path)
+-            return Response({"detail": f"Could not parse file: {exc}"}, status=400)
+-        finally:
+-            try:
+-                os.unlink(tmp_path)
+-            except Exception:
+-                pass
+-
+-        if not rows:
+-            return Response({"detail": "No unit-lecturer mappings found in document."}, status=400)
+-
+-        term = AcademicTerm.objects.filter(is_current=True).first()
+-        if not term:
+-            return Response({"detail": "No current academic term set."}, status=400)
+-
+-        # Build lookup: normalised_code → Unit
+-        all_units = {_normalise_code(u.code): u for u in Unit.objects.all()}
+-
+-        matched = []
+-        unmatched = []
+-        slots_updated = 0
+-
+-        for row in rows:
+-            norm_code = row["unit_code"]
+-            unit = all_units.get(norm_code)
+-
+-            if not unit:
+-                unmatched.append({
+-                    "unit_code": row["unit_code_raw"],
+-                    "lecturer": row["lecturer_name"],
+-                    "reason": "Unit not found in master timetable",
+-                })
+-                continue
+-
+-            # Try to find existing Lecturer profile by phone
+-            from apps.core.models import Lecturer
+-            from apps.accounts.models import User
+-
+-            lecturer_profile = None
+-
+-            # Match by phone number on User account
+-            phone = row["phone"]
+-            if phone:
+-                user = User.objects.filter(phone_number=phone).first()
+-                if user:
+-                    lecturer_profile, _ = Lecturer.objects.get_or_create(
+-                        user=user,
+-                        defaults={"department": unit.department, "title": ""},
+-                    )
+-
+-            # Update TimetableSlots for this unit in current term
+-            slots = TimetableSlot.objects.filter(term=term, unit=unit)
+-            update_count = slots.update(
+-                lecturer=lecturer_profile,
+-                lecturer_name_text=row["lecturer_name"],
+-            )
+-            slots_updated += update_count
+-
+-            matched.append({
+-                "unit_code": row["unit_code_raw"],
+-                "lecturer": row["lecturer_name"],
+-                "phone": row["phone"],
+-                "slots_updated": update_count,
+-                "account_linked": lecturer_profile is not None,
+-            })
+-
+-        return Response({
+-            "detail": f"Processed {len(rows)} allocation rows.",
+-            "matched": len(matched),
+-            "unmatched": len(unmatched),
+-            "slots_updated": slots_updated,
+-            "results": matched,
+-            "not_found": unmatched,
+-        })
+diff --git a/apps/units/migrations/0001_initial.py b/apps/units/migrations/0001_initial.py
+index ef4ae7a..3145c4e 100644
+--- a/apps/units/migrations/0001_initial.py
++++ b/apps/units/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import django.db.models.deletion
+ from django.db import migrations, models
+diff --git a/apps/units/urls.py b/apps/units/urls.py
+index 7071a59..7781018 100644
+--- a/apps/units/urls.py
++++ b/apps/units/urls.py
+@@ -1,11 +1,3 @@
+-from rest_framework.routers import DefaultRouter
+-from django.urls import path, include
+-from apps.units.views.views import UnitViewSet
+-
+-router = DefaultRouter()
+-router.register(r"units", UnitViewSet, basename="unit")
+-
+-urlpatterns = [path("", include(router.urls))]
+ from django.urls import include, path
+ from rest_framework.routers import DefaultRouter
+ 
+diff --git a/apps/uploads/migrations/0001_initial.py b/apps/uploads/migrations/0001_initial.py
+index 71c7409..7f20051 100644
+--- a/apps/uploads/migrations/0001_initial.py
++++ b/apps/uploads/migrations/0001_initial.py
+@@ -1,4 +1,4 @@
+-# Generated by Django 5.2.7 on 2026-05-22 13:51
++# Generated by Django 5.1 on 2026-08-22 17:55
+ 
+ import django.core.validators
+ import django.db.models.deletion
+@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
+                 ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                 ('created_at', models.DateTimeField(auto_now_add=True)),
+                 ('updated_at', models.DateTimeField(auto_now=True)),
+-                ('uploaded_file', models.FileField(upload_to='uploads/timetables/%Y/%m/%d', validators=[django.core.validators.FileExtensionValidator(allowed_extensions=['xlsx', 'xlsm'])])),
++                ('uploaded_file', models.FileField(upload_to='uploads/timetables/%Y/%m/%d', validators=[django.core.validators.FileExtensionValidator(allowed_extensions=['xlsm', 'xlsx'])])),
+                 ('upload_type', models.CharField(choices=[('timetable', 'Timetable')], default='timetable', max_length=20)),
+                 ('original_filename', models.CharField(max_length=255)),
+                 ('processing_status', models.CharField(choices=[('received', 'Received'), ('validating', 'Validating'), ('processing', 'Processing'), ('partial', 'Partial'), ('processed', 'Processed'), ('failed', 'Failed')], default='received', max_length=20)),
+diff --git a/apps/uploads/migrations/0002_alter_timetableupload_uploaded_file.py b/apps/uploads/migrations/0002_alter_timetableupload_uploaded_file.py
+deleted file mode 100644
+index 5cae5f8..0000000
+--- a/apps/uploads/migrations/0002_alter_timetableupload_uploaded_file.py
++++ /dev/null
+@@ -1,19 +0,0 @@
+-# Generated by Django 5.1 on 2026-06-09 12:43
+-
+-import django.core.validators
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ('uploads', '0001_initial'),
+-    ]
+-
+-    operations = [
+-        migrations.AlterField(
+-            model_name='timetableupload',
+-            name='uploaded_file',
+-            field=models.FileField(upload_to='uploads/timetables/%Y/%m/%d', validators=[django.core.validators.FileExtensionValidator(allowed_extensions=['xlsm', 'xlsx'])]),
+-        ),
+-    ]
+diff --git a/apps/uploads/migrations/0003_alter_timetableupload_uploaded_file.py b/apps/uploads/migrations/0003_alter_timetableupload_uploaded_file.py
+deleted file mode 100644
+index 8b958cd..0000000
+--- a/apps/uploads/migrations/0003_alter_timetableupload_uploaded_file.py
++++ /dev/null
+@@ -1,19 +0,0 @@
+-# Generated by Django 5.1 on 2026-06-09 12:47
+-
+-import django.core.validators
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ('uploads', '0002_alter_timetableupload_uploaded_file'),
+-    ]
+-
+-    operations = [
+-        migrations.AlterField(
+-            model_name='timetableupload',
+-            name='uploaded_file',
+-            field=models.FileField(upload_to='uploads/timetables/%Y/%m/%d', validators=[django.core.validators.FileExtensionValidator(allowed_extensions=['xlsx', 'xlsm'])]),
+-        ),
+-    ]
+diff --git a/apps/uploads/migrations/0004_alter_timetableupload_uploaded_file.py b/apps/uploads/migrations/0004_alter_timetableupload_uploaded_file.py
+deleted file mode 100644
+index a368d14..0000000
+--- a/apps/uploads/migrations/0004_alter_timetableupload_uploaded_file.py
++++ /dev/null
+@@ -1,19 +0,0 @@
+-# Generated by Django 5.2.14 on 2026-06-12 12:28
+-
+-import django.core.validators
+-from django.db import migrations, models
+-
+-
+-class Migration(migrations.Migration):
+-
+-    dependencies = [
+-        ('uploads', '0003_alter_timetableupload_uploaded_file'),
+-    ]
+-
+-    operations = [
+-        migrations.AlterField(
+-            model_name='timetableupload',
+-            name='uploaded_file',
+-            field=models.FileField(upload_to='uploads/timetables/%Y/%m/%d', validators=[django.core.validators.FileExtensionValidator(allowed_extensions=['xlsm', 'xlsx'])]),
+-        ),
+-    ]
+diff --git a/config/settings/base.py b/config/settings/base.py
+index cdd73d4..380df6e 100644
+--- a/config/settings/base.py
++++ b/config/settings/base.py
+@@ -33,7 +33,6 @@ INSTALLED_APPS = [
+     "apps.accounts",
+     "apps.analytics",
+     "apps.common",
+-    "apps.core",
+     "apps.curriculum",
+     "apps.departments",
+     "apps.enrollments",
+diff --git a/config/urls.py b/config/urls.py
+index 351c77d..8e969b3 100644
+--- a/config/urls.py
++++ b/config/urls.py
+@@ -4,7 +4,13 @@ from django.urls import include, path
+ urlpatterns = [
+     path("admin/", admin.site.urls),
+     path("api/v1/auth/", include("apps.accounts.urls")),
+-    path("api/v1/core/", include("apps.core.urls")),
++    path("api/v1/departments/", include("apps.departments.urls")),
++    path("api/v1/programs/", include("apps.programs.urls")),
++    path("api/v1/rooms/", include("apps.rooms.urls")),
++    path("api/v1/lecturers/", include("apps.lecturers.urls")),
++    path("api/v1/units/", include("apps.units.urls")),
++    path("api/v1/students/", include("apps.students.urls")),
++    path("api/v1/enrollments/", include("apps.enrollments.urls")),
+     path("api/v1/timetable/", include("apps.timetable.urls")),
+     path("api/v1/courses/", include("apps.courses.urls")),
+     path("api/v1/schedule/", include("apps.schedule.urls")),
+-- 
+2.43.0
+

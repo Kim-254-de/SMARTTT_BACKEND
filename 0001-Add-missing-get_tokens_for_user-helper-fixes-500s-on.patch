@@ -1,0 +1,47 @@
+From c4acca95925e5659f8bd626d38fec37cff7f5eae Mon Sep 17 00:00:00 2001
+From: Emmanuel Kimathi <kimathi@example.com>
+Date: Thu, 27 Aug 2026 09:05:01 +0000
+Subject: [PATCH] Add missing get_tokens_for_user helper - fixes 500s on
+ register/login/Google auth
+
+RegisterView, LoginView, GoogleAuthView, and LecturerRegisterView all
+call get_tokens_for_user(user) to issue a JWT pair, but the function
+was never defined anywhere in the file (likely lost in the wayler
+branch merge). Every one of these four endpoints was throwing
+NameError: name 'get_tokens_for_user' is not defined -> 500, in
+production right now, not just registration as reported.
+
+Added the helper using RefreshToken.for_user(), matching the
+{'access': ..., 'refresh': ...} shape all four call sites already
+expect.
+
+Verified locally: register now returns 201 with a valid access/
+refresh pair, login returns 200 with the same, both against a fresh
+database.
+---
+ apps/accounts/views/auth_views.py | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/apps/accounts/views/auth_views.py b/apps/accounts/views/auth_views.py
+index cdf110a..67f0fea 100644
+--- a/apps/accounts/views/auth_views.py
++++ b/apps/accounts/views/auth_views.py
+@@ -25,6 +25,15 @@ resend.api_key = settings.RESEND_API_KEY
+ 
+ # Using Django sessions instead of issuing JWTs; login the user to create a session
+ 
++def get_tokens_for_user(user):
++    """Issue a fresh JWT access/refresh pair for a user."""
++    refresh = RefreshToken.for_user(user)
++    return {
++        "refresh": str(refresh),
++        "access": str(refresh.access_token),
++    }
++
++
+ def serialize_user(user):
+     student = getattr(user, 'student_profile', None)
+     program = getattr(student, 'program', None)
+-- 
+2.43.0
+

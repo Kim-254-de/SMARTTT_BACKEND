@@ -1,0 +1,28 @@
+From 20faa43e0b70a5d9ab8105cc18b5f3abeb939dcd Mon Sep 17 00:00:00 2001
+From: Emmanuel Kimathi <kimathi@example.com>
+Date: Sat, 22 Aug 2026 19:12:10 +0000
+Subject: [PATCH] Add missing argon2-cffi dependency for Argon2PasswordHasher
+
+PASSWORD_HASHERS lists Argon2PasswordHasher first, but argon2-cffi
+was never added to requirements.txt, so create_admin failed with
+ModuleNotFoundError: No module named 'argon2' as soon as it tried
+to hash the superuser's password.
+---
+ requirements.txt | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/requirements.txt b/requirements.txt
+index 9fbc00f..b25e95d 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -7,6 +7,7 @@ dj-database-url==3.1.2
+ psycopg[binary]==3.3.4
+ whitenoise[brotli]==6.9.0
+ python-dotenv==1.0.1
++argon2-cffi==25.1.0
+ pandas==2.3.3
+ openpyxl==3.1.5
+ pdfplumber==0.11.4
+-- 
+2.43.0
+

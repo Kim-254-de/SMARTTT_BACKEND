@@ -1,0 +1,381 @@
+From d10c1aae2bfa28e09ac57a5673521197ce933be3 Mon Sep 17 00:00:00 2001
+From: Emmanuel Kimathi <kimathi@example.com>
+Date: Tue, 25 Aug 2026 01:18:05 +0000
+Subject: [PATCH] Fix program_code length limit and large-upload performance
+
+Your 800+ row document hit two more real bugs:
+
+1. Invalid program_code 'DIP. PROC. & LOG MNGT' (22 chars) - the
+   validator capped program_code at 20 chars, and persistence.py
+   truncated it to 20 chars too, but the actual database column
+   allows 64. Raised both to match the real schema (also fixed the
+   same over-truncation for unit_code and name fields, capped at 100
+   instead of the real 255-char limit).
+
+2. Worker timeout + OOM kill - conflict_detector.detect() compared
+   every slot in the batch against every other slot (O(n^2) - for
+   800 rows that's ~320,000 comparisons), and issued one individual
+   INSERT per conflict found. This predates today's changes; it just
+   never got exercised at this scale before since earlier bugs
+   crashed uploads before reaching this stage.
+   - Bucket slots by (term, day_of_week) before comparing pairs,
+     since conflicts can only occur within the same term/day -
+     avoids comparing across days entirely
+   - bulk_create() all conflicts in one query instead of one INSERT
+     per conflict
+   - persistence.py now caches Term/Department/Program/Unit/Room/
+     Lecturer lookups per batch instead of re-querying on every row,
+     since the same codes repeat constantly across a real upload.
+     Cache writes are deferred until each row's savepoint actually
+     commits - if a row fails for an unrelated reason after already
+     creating a new Program/Unit, the savepoint rollback undoes that
+     creation, so caching it immediately would leave a dangling
+     reference that corrupts every later row sharing that code.
+
+Verified against a fresh database with an 800-row batch (repeated
+program/unit/room codes, one deliberately broken row partway through
+to confirm the rollback-safety fix): 799/800 rows saved correctly in
+1.8 seconds (previously timing out past 120s), and the program
+involved in the broken row was not duplicated or corrupted.
+---
+ apps/timetable/services/conflict_detector.py  | 100 ++++++-----
+ apps/timetable/services/persistence.py        | 161 ++++++++++++------
+ apps/timetable/validators/upload_validator.py |   2 +-
+ 3 files changed, 163 insertions(+), 100 deletions(-)
+
+diff --git a/apps/timetable/services/conflict_detector.py b/apps/timetable/services/conflict_detector.py
+index ce2c990..4dd5b8d 100644
+--- a/apps/timetable/services/conflict_detector.py
++++ b/apps/timetable/services/conflict_detector.py
+@@ -33,58 +33,68 @@ class TimetableConflictDetectionService:
+         """
+         Detect conflicts in timetable slots.
+         
++        Slots are bucketed by (term_id, day_of_week) before comparing pairs,
++        since conflicts can only occur within the same term and day - this
++        avoids comparing every slot against every other slot in the whole
++        batch, which scales quadratically and becomes very slow on large
++        uploads (hundreds of rows).
++        
+         Args:
+             slots: List of TimetableSlot instances to check
+             
+         Returns:
+             List of detected TimetableConflict instances
+         """
+-        conflicts = []
+         conflict_details = {}
+-        
+-        for i, current_slot in enumerate(slots):
+-            for candidate_slot in slots[i + 1:]:
+-                # Conflicts only occur in same term and day
+-                if current_slot.term_id != candidate_slot.term_id:
+-                    continue
+-                if current_slot.day_of_week != candidate_slot.day_of_week:
+-                    continue
+-                
+-                # Check if times overlap
+-                if not self._check_time_overlap(current_slot, candidate_slot):
+-                    continue
+-                
+-                # Determine conflict type(s)
+-                conflict_types = self._determine_conflict_types(current_slot, candidate_slot)
+-                
+-                for conflict_type in conflict_types:
+-                    # Create conflict record
+-                    conflict = TimetableConflict.objects.create(
+-                        conflict_type=conflict_type,
+-                        term=current_slot.term,
+-                        slot_a=current_slot,
+-                        slot_b=candidate_slot,
+-                        details=self._generate_conflict_details(
+-                            current_slot,
+-                            candidate_slot,
+-                            conflict_type
+-                        ),
+-                    )
+-                    conflicts.append(conflict)
+-                    
+-                    # Log conflict detection
+-                    self.logger.log_conflict_detected(
+-                        upload_batch_id=current_slot.upload_batch_id or "unknown",
+-                        conflict_type=conflict_type,
+-                        slot_a_id=current_slot.id,
+-                        slot_b_id=candidate_slot.id,
+-                    )
+-                    
+-                    # Track for statistics
+-                    if conflict_type not in conflict_details:
+-                        conflict_details[conflict_type] = 0
+-                    conflict_details[conflict_type] += 1
+-        
++        pending = []  # list of (conflict_type, current_slot, candidate_slot)
++
++        buckets: Dict[tuple, List[TimetableSlot]] = {}
++        for slot in slots:
++            key = (slot.term_id, slot.day_of_week)
++            buckets.setdefault(key, []).append(slot)
++
++        for bucket_slots in buckets.values():
++            for i, current_slot in enumerate(bucket_slots):
++                for candidate_slot in bucket_slots[i + 1:]:
++                    if not self._check_time_overlap(current_slot, candidate_slot):
++                        continue
++
++                    conflict_types = self._determine_conflict_types(current_slot, candidate_slot)
++                    for conflict_type in conflict_types:
++                        pending.append((conflict_type, current_slot, candidate_slot))
++                        if conflict_type not in conflict_details:
++                            conflict_details[conflict_type] = 0
++                        conflict_details[conflict_type] += 1
++
++        if not pending:
++            return []
++
++        # Build all conflict objects in memory, then a single bulk_create
++        # instead of one INSERT per conflict (can be thousands on a large
++        # upload with genuine overlaps).
++        to_create = [
++            TimetableConflict(
++                conflict_type=conflict_type,
++                term=current_slot.term,
++                slot_a=current_slot,
++                slot_b=candidate_slot,
++                details=self._generate_conflict_details(current_slot, candidate_slot, conflict_type),
++            )
++            for conflict_type, current_slot, candidate_slot in pending
++        ]
++        conflicts = TimetableConflict.objects.bulk_create(to_create)
++
++        # Log each conflict (kept per-conflict for compatibility with
++        # existing log consumers, but the expensive part - the INSERT -
++        # is now a single bulk_create above, not one per conflict).
++        for conflict_type, current_slot, candidate_slot in pending:
++            self.logger.log_conflict_detected(
++                upload_batch_id=current_slot.upload_batch_id or "unknown",
++                conflict_type=conflict_type,
++                slot_a_id=current_slot.id,
++                slot_b_id=candidate_slot.id,
++            )
++
+         return conflicts
+     
+     @staticmethod
+diff --git a/apps/timetable/services/persistence.py b/apps/timetable/services/persistence.py
+index f0806a4..8275fe4 100644
+--- a/apps/timetable/services/persistence.py
++++ b/apps/timetable/services/persistence.py
+@@ -30,13 +30,37 @@ class TimetablePersistenceService:
+         saved_slots = []
+         errors = []
+         
++        # Per-batch caches: the same program/unit/room/lecturer/term codes
++        # commonly repeat across hundreds of rows in a real timetable upload,
++        # so cache lookups by code instead of re-querying the database on
++        # every single row.
++        cache = {
++            "term": {},
++            "department": {},
++            "program": {},
++            "unit": {},
++            "room": {},
++            "lecturer": {},
++        }
++        
+         for idx, row in enumerate(rows, 1):
+             try:
+                 # Each row gets its own savepoint so a genuine database-level
+                 # error (e.g. a constraint violation) on one row can't poison
+                 # the whole transaction and cascade-fail every row after it.
++                #
++                # Cache writes are only merged in AFTER the savepoint commits
++                # successfully - if we wrote to the shared cache mid-row and
++                # that row later failed for an unrelated reason (e.g. a bad
++                # room_code after a new Program/Unit was already created),
++                # the savepoint rollback would undo that Program/Unit, but
++                # the cache would still hold a dangling reference to it and
++                # poison every later row that shares that code.
++                pending_cache = {k: {} for k in cache}
+                 with transaction.atomic():
+-                    slot = self._get_or_create_slot(upload_batch, row)
++                    slot = self._get_or_create_slot(upload_batch, row, cache, pending_cache)
++                for section, entries in pending_cache.items():
++                    cache[section].update(entries)
+                 saved_slots.append(slot)
+                 
+             except DuplicateSessionException as e:
+@@ -71,76 +95,105 @@ class TimetablePersistenceService:
+     def _get_or_create_slot(
+         self,
+         upload_batch,
+-        row: Dict[str, Any]
++        row: Dict[str, Any],
++        cache: Dict[str, Dict[str, Any]] = None,
++        pending_cache: Dict[str, Dict[str, Any]] = None,
+     ) -> TimetableSlot:
++        if cache is None:
++            cache = {"term": {}, "department": {}, "program": {}, "unit": {}, "room": {}, "lecturer": {}}
++        if pending_cache is None:
++            pending_cache = {k: {} for k in cache}
++
+         # Get AcademicTerm
+-        try:
+-            term = AcademicTerm.objects.get(
+-                academic_year=row["academic_year"],
+-                semester=row["semester"]
+-            )
+-        except AcademicTerm.DoesNotExist:
+-            raise ResourceNotFoundException(
+-                f"Academic term not found: {row['academic_year']} S{row['semester']}"
+-            )
+-        
++        term_key = (row["academic_year"], row["semester"])
++        term = cache["term"].get(term_key)
++        if term is None:
++            try:
++                term = AcademicTerm.objects.get(
++                    academic_year=row["academic_year"],
++                    semester=row["semester"]
++                )
++            except AcademicTerm.DoesNotExist:
++                raise ResourceNotFoundException(
++                    f"Academic term not found: {row['academic_year']} S{row['semester']}"
++                )
++            pending_cache["term"][term_key] = term
++
+         # Get or create Department (for program/unit assignment)
+-        department = Department.objects.filter(code__iexact="COMP").first()
+-        if not department:
+-            from apps.departments.models import Faculty
+-            default_faculty, _ = Faculty.objects.get_or_create(
+-                code="GEN",
+-                defaults={"name": "General"}
+-            )
+-            department, _ = Department.objects.get_or_create(
+-                code="COMP",
+-                defaults={"name": "School of Computing", "faculty": default_faculty}
+-            )
++        department = cache["department"].get("COMP")
++        if department is None:
++            department = Department.objects.filter(code__iexact="COMP").first()
++            if not department:
++                from apps.departments.models import Faculty
++                default_faculty, _ = Faculty.objects.get_or_create(
++                    code="GEN",
++                    defaults={"name": "General"}
++                )
++                department, _ = Department.objects.get_or_create(
++                    code="COMP",
++                    defaults={"name": "School of Computing", "faculty": default_faculty}
++                )
++            pending_cache["department"]["COMP"] = department
+             
+         # Get or create Program
+         program_code = row["program_code"]
+-        program = Program.objects.filter(code__iexact=program_code).first()
+-        if not program:
+-            program = Program.objects.create(
+-                code=program_code[:20],
+-                name=f"Program {program_code}"[:100],
+-                department=department,
+-                duration_years=4
+-            )
++        program_key = program_code.lower()
++        program = cache["program"].get(program_key)
++        if program is None:
++            program = Program.objects.filter(code__iexact=program_code).first()
++            if not program:
++                program = Program.objects.create(
++                    code=program_code[:64],
++                    name=f"Program {program_code}"[:255],
++                    department=department,
++                    duration_years=4
++                )
++            pending_cache["program"][program_key] = program
+             
+         # Get or create Unit
+         unit_code = row["unit_code"]
+-        unit = Unit.objects.filter(code__iexact=unit_code).first()
+-        if not unit:
+-            unit_name = row.get("unit_name") or unit_code
+-            unit = Unit.objects.create(
+-                code=unit_code[:20],
+-                name=unit_name[:100],
+-                credit_hours=3.0,
+-                department=department
+-            )
++        unit_key = unit_code.lower()
++        unit = cache["unit"].get(unit_key)
++        if unit is None:
++            unit = Unit.objects.filter(code__iexact=unit_code).first()
++            if not unit:
++                unit_name = row.get("unit_name") or unit_code
++                unit = Unit.objects.create(
++                    code=unit_code[:64],
++                    name=unit_name[:255],
++                    credit_hours=3.0,
++                    department=department
++                )
++            pending_cache["unit"][unit_key] = unit
+         
+         # Get Room
+-        try:
+-            room = Room.objects.get(code=row["room_code"])
+-        except Room.DoesNotExist:
+-            raise ResourceNotFoundException(
+-                f"Room not found: {row['room_code']}"
+-            )
++        room_key = row["room_code"]
++        room = cache["room"].get(room_key)
++        if room is None:
++            try:
++                room = Room.objects.get(code=row["room_code"])
++            except Room.DoesNotExist:
++                raise ResourceNotFoundException(
++                    f"Room not found: {row['room_code']}"
++                )
++            pending_cache["room"][room_key] = room
+         
+         # Get Lecturer (optional — a slot can exist before a lecturer is
+         # assigned; assignment happens later via the allocation upload)
+         lecturer_university_id = str(row.get("lecturer_university_id") or "").strip()
+         lecturer = None
+         if lecturer_university_id:
+-            try:
+-                lecturer = Lecturer.objects.select_related("user").get(
+-                    user__university_id=lecturer_university_id
+-                )
+-            except Lecturer.DoesNotExist:
+-                raise ResourceNotFoundException(
+-                    f"Lecturer not found: {lecturer_university_id}"
+-                )
++            lecturer = cache["lecturer"].get(lecturer_university_id)
++            if lecturer is None:
++                try:
++                    lecturer = Lecturer.objects.select_related("user").get(
++                        user__university_id=lecturer_university_id
++                    )
++                except Lecturer.DoesNotExist:
++                    raise ResourceNotFoundException(
++                        f"Lecturer not found: {lecturer_university_id}"
++                    )
++                pending_cache["lecturer"][lecturer_university_id] = lecturer
+         
+         # Check for duplicate
+         existing = TimetableSlot.objects.filter(
+diff --git a/apps/timetable/validators/upload_validator.py b/apps/timetable/validators/upload_validator.py
+index 2d6219d..6147858 100644
+--- a/apps/timetable/validators/upload_validator.py
++++ b/apps/timetable/validators/upload_validator.py
+@@ -143,7 +143,7 @@ class TimetableUploadValidator:
+         
+         # Validate string fields length and format
+         program_code = str(row.get("program_code", "")).strip()
+-        if not program_code or len(program_code) > 20:
++        if not program_code or len(program_code) > 64:
+             errors.append(f"Row {row_number}: Invalid program_code '{program_code}'")
+         
+         unit_code = str(row.get("unit_code", "")).strip()
+-- 
+2.43.0
+

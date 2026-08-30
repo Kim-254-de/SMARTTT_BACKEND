@@ -1,0 +1,107 @@
+From db6aab2c5321002c68d0e8bdd0d7033120864ca1 Mon Sep 17 00:00:00 2001
+From: Emmanuel Kimathi <kimathi@example.com>
+Date: Sun, 23 Aug 2026 19:45:56 +0000
+Subject: [PATCH] Fix Department auto-create and lecturer-optional conflict
+ detection
+
+Your last upload's logs showed 60+ cascading 'Database error' entries,
+all from one root cause: persistence.py auto-creates a default
+Department (code=COMP) but never supplied a faculty, which is a
+required field. The resulting IntegrityError poisoned the entire
+batch's transaction (save_rows wraps the whole batch in one
+@transaction.atomic), so every row after the first failure cascaded
+into the same generic error - a 60-row upload looked completely dead
+from one missing field.
+
+Fixes:
+- Department auto-create now also auto-creates a default Faculty
+  (code=GEN) and passes it through, matching the same lenient
+  auto-create pattern already used for Program/Unit
+- Each row in save_rows now runs in its own savepoint
+  (transaction.atomic() per row) instead of the whole batch sharing
+  one transaction, so a genuine database-level error on one row can
+  no longer cascade and fail every row after it
+- conflict_detector.py crashed with 'NoneType has no attribute user'
+  as soon as any slot had no lecturer assigned (our new nullable
+  lecturer support) - guarded both conflict-detail generation and,
+  more importantly, fixed a latent logic bug where two lecturer-less
+  slots (lecturer_id IS NULL on both) were incorrectly flagged as a
+  'lecturer conflict' since None == None
+
+Verified against a fresh database: a 10-row batch upload with no
+pre-existing Department/Faculty now saves all 10 rows successfully
+instead of crashing on the first row and cascading to the rest.
+---
+ apps/timetable/services/conflict_detector.py |  8 ++++----
+ apps/timetable/services/persistence.py       | 14 +++++++++++---
+ 2 files changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/apps/timetable/services/conflict_detector.py b/apps/timetable/services/conflict_detector.py
+index 0ff9955..ce2c990 100644
+--- a/apps/timetable/services/conflict_detector.py
++++ b/apps/timetable/services/conflict_detector.py
+@@ -113,8 +113,8 @@ class TimetableConflictDetectionService:
+         if slot_a.room_id == slot_b.room_id:
+             conflicts.append(TimetableConflict.Type.ROOM)
+         
+-        # Lecturer conflict: same lecturer
+-        if slot_a.lecturer_id == slot_b.lecturer_id:
++        # Lecturer conflict: same lecturer (only if both slots actually have one assigned)
++        if slot_a.lecturer_id and slot_b.lecturer_id and slot_a.lecturer_id == slot_b.lecturer_id:
+             conflicts.append(TimetableConflict.Type.LECTURER)
+         
+         # Program conflict: same program
+@@ -146,14 +146,14 @@ class TimetableConflictDetectionService:
+             "slot_a": {
+                 "id": str(slot_a.id),
+                 "unit": str(slot_a.unit.code),
+-                "lecturer": slot_a.lecturer.user.university_id,
++                "lecturer": slot_a.lecturer.user.university_id if slot_a.lecturer else None,
+                 "room": slot_a.room.code,
+                 "time": f"{slot_a.start_time} - {slot_a.end_time}",
+             },
+             "slot_b": {
+                 "id": str(slot_b.id),
+                 "unit": str(slot_b.unit.code),
+-                "lecturer": slot_b.lecturer.user.university_id,
++                "lecturer": slot_b.lecturer.user.university_id if slot_b.lecturer else None,
+                 "room": slot_b.room.code,
+                 "time": f"{slot_b.start_time} - {slot_b.end_time}",
+             },
+diff --git a/apps/timetable/services/persistence.py b/apps/timetable/services/persistence.py
+index 5fe0224..f0806a4 100644
+--- a/apps/timetable/services/persistence.py
++++ b/apps/timetable/services/persistence.py
+@@ -32,8 +32,11 @@ class TimetablePersistenceService:
+         
+         for idx, row in enumerate(rows, 1):
+             try:
+-                # Check for existence before creating
+-                slot = self._get_or_create_slot(upload_batch, row)
++                # Each row gets its own savepoint so a genuine database-level
++                # error (e.g. a constraint violation) on one row can't poison
++                # the whole transaction and cascade-fail every row after it.
++                with transaction.atomic():
++                    slot = self._get_or_create_slot(upload_batch, row)
+                 saved_slots.append(slot)
+                 
+             except DuplicateSessionException as e:
+@@ -84,9 +87,14 @@ class TimetablePersistenceService:
+         # Get or create Department (for program/unit assignment)
+         department = Department.objects.filter(code__iexact="COMP").first()
+         if not department:
++            from apps.departments.models import Faculty
++            default_faculty, _ = Faculty.objects.get_or_create(
++                code="GEN",
++                defaults={"name": "General"}
++            )
+             department, _ = Department.objects.get_or_create(
+                 code="COMP",
+-                defaults={"name": "School of Computing"}
++                defaults={"name": "School of Computing", "faculty": default_faculty}
+             )
+             
+         # Get or create Program
+-- 
+2.43.0
+
