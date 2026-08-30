@@ -16,6 +16,7 @@ import requests
 import resend
 
 from apps.accounts.models import PasswordResetToken, User
+from apps.accounts.serializers.user_serializer import UserSerializer
 from apps.departments.models import Department, Faculty
 from apps.programs.models.program import Program
 from apps.students.models.student import Student
@@ -243,6 +244,65 @@ class ProfileView(APIView):
         return Response(serialize_user(user))
 
 
+class DeleteAccountView(APIView):
+    """
+    Self-service account deletion.
+
+    This is a SOFT delete: the account is deactivated (login blocked,
+    all outstanding JWTs blacklisted) but the underlying User row and
+    all academic records linked to it (enrollments, timetable history,
+    uploads, notifications, etc.) are kept intact for the institution's
+    records - nothing is actually erased.
+
+    If the user is a lecturer, they are automatically unassigned from
+    every timetable slot they're currently on (lecturer set to null on
+    those slots) as part of deletion, so the timetable doesn't keep
+    showing a deactivated lecturer as teaching a live class.
+
+    Requires the user's current password to confirm, since this is a
+    destructive, hard-to-reverse action initiated purely from a bearer
+    token - password confirmation guards against a leaked/stolen access
+    token being used to lock someone out of their own account.
+    """
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def post(self, request):
+        user = request.user
+        password = request.data.get('password')
+
+        if not password:
+            return Response(
+                {"detail": "Current password is required to delete your account."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not user.check_password(password):
+            return Response(
+                {"detail": "Incorrect password."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        slots_unassigned = 0
+        lecturer = getattr(user, 'lecturer_profile', None)
+        if lecturer:
+            from apps.timetable.models import TimetableSlot
+            slots_unassigned = TimetableSlot.objects.filter(lecturer=lecturer).update(lecturer=None)
+
+        # Blacklist every outstanding refresh token for this user so
+        # existing sessions/devices can't keep using them after deletion.
+        from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
+        for token in OutstandingToken.objects.filter(user=user):
+            BlacklistedToken.objects.get_or_create(token=token)
+
+        user.is_active = False
+        user.save(update_fields=['is_active'])
+
+        return Response({
+            "detail": "Account deleted. You have been logged out of all devices.",
+            "slots_unassigned": slots_unassigned,
+        })
+
+
 class PasswordResetRequestView(APIView):
     permission_classes = [AllowAny]
 
@@ -447,7 +507,7 @@ class LecturerRegisterView(APIView):
         )
 
         if department:
-            Lecturer.objects.create(user=user, department=department, title="")
+            Lecturer.objects.create(user=user, department=department, rank="")
 
         valid_staff.is_claimed = True
         valid_staff.save(update_fields=["is_claimed"])
