@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
     dependencies = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
         ("notifications", "0001_initial"),
-        ("timetable", "0002_timetableslot_lecturer_name_text"),
+        ("timetable", "0003_timetableslot_lecturer_name_text"),
     ]
 
     operations = [

@@ -73,6 +73,14 @@ class TimetableSlot(BaseModel):
         null=True,
         blank=True,
     )
+    lecturer_name_text = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Fallback display name for the lecturer when no linked "
+                  "Lecturer account exists yet (e.g. parsed from a document "
+                  "but not yet matched to a registered account).",
+    )
     room = models.ForeignKey(
         "rooms.Room",
         on_delete=models.PROTECT,

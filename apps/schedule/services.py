@@ -72,13 +72,13 @@ def generate_for_user(user) -> dict:
         TimetableSlot.objects.select_related(
             "unit", "program", "lecturer__user", "room", "term"
         ).filter(term=term, unit_id__in=unit_ids)
-        .order_by("day", "start_time")
+        .order_by("day_of_week", "start_time")
     )
 
     # ── 4. Group by day ────────────────────────────────────────────────────────
     grouped: dict[str, list] = {day: [] for day in DAY_ORDER}
     for slot in slots:
-        grouped.setdefault(slot.day, []).append(_serialise_slot(slot))
+        grouped.setdefault(slot.day_of_week.upper(), []).append(_serialise_slot(slot))
 
     # Sort each day by start_time
     for day in grouped:
@@ -87,7 +87,7 @@ def generate_for_user(user) -> dict:
     # ── 5. Detect conflicts (two slots on same day overlapping in time) ────────
     conflicts = []
     for day, day_slots in grouped.items():
-        raw_day_slots = [s for s in slots if s.day == day]
+        raw_day_slots = [s for s in slots if s.day_of_week.upper() == day]
         for i, a in enumerate(raw_day_slots):
             for b in raw_day_slots[i + 1:]:
                 if _has_overlap(a, b):
@@ -116,7 +116,7 @@ def _serialise_slot(slot: TimetableSlot) -> dict:
         "id": str(slot.id),
         "unit_code": slot.unit.code,
         "unit_name": slot.unit.name,
-        "day": slot.day,
+        "day": slot.day_of_week.upper(),
         "start_time": slot.start_time.strftime("%H:%M"),
         "end_time": slot.end_time.strftime("%H:%M"),
         "room": slot.room.code if slot.room else None,
