@@ -1,0 +1,150 @@
+From bf25b4c96af71bd48eef75720e685e5b906ad863 Mon Sep 17 00:00:00 2001
+From: Emmanuel Kimathi <kimathi@example.com>
+Date: Mon, 31 Aug 2026 05:41:42 +0000
+Subject: [PATCH] Fix missing migration and broken student-timetable feature
+
+Your build failure:
+  NodeNotFoundError: Migration notifications.0002_..._automated_sender
+  dependencies reference nonexistent parent node
+  ('timetable', '0002_timetableslot_lecturer_name_text')
+
+Root cause: apps/schedule/services.py already references
+slot.lecturer_name_text as a fallback display name, and the
+notifications migration already depends on a timetable migration
+named after that field - but the field itself was never actually
+added to the TimetableSlot model. Almost certainly dropped during a
+merge conflict with an earlier 'make lecturer nullable' migration
+that touched the same model around the same time, on a different
+branch - the code and the migration reference survived, the actual
+field definition didn't.
+
+Fixes:
+- Added TimetableSlot.lecturer_name_text (CharField, blank) and
+  generated its migration (0003_timetableslot_lecturer_name_text,
+  since 0002 was already taken) - repointed the notifications
+  migration's dependency at this real migration instead of the
+  missing one.
+
+While fixing this I found the entire student personal-timetable
+feature (apps/schedule/services.py, powers 'my schedule' for
+students) was separately, completely broken:
+- Used slot.day everywhere (queryset ordering, grouping, filtering,
+  and the API response) - TimetableSlot has no such field, only
+  day_of_week. Every call to generate_for_user() would have thrown
+  FieldError on the very first query.
+- Even after fixing the field name: day_of_week is stored lowercase
+  ('mon') but DAY_ORDER and the response dict use uppercase ('MON'),
+  so real slot data was silently landing in stray lowercase dict
+  keys instead of the intended MON-SAT buckets, which stayed empty.
+
+Verified end-to-end against a fresh database: full migration graph
+applies cleanly, and a real call to generate_for_user() with two
+overlapping slots (one with a linked lecturer, one using the
+lecturer_name_text fallback, one with neither) correctly groups both
+into MON, correctly detects the time conflict, and correctly
+resolves the lecturer display name for all three cases.
+---
+ ...assreminderdelivery_and_automated_sender.py |  2 +-
+ apps/schedule/services.py                      |  8 ++++----
+ .../0003_timetableslot_lecturer_name_text.py   | 18 ++++++++++++++++++
+ apps/timetable/models/timetable.py             |  8 ++++++++
+ 4 files changed, 31 insertions(+), 5 deletions(-)
+ create mode 100644 apps/timetable/migrations/0003_timetableslot_lecturer_name_text.py
+
+diff --git a/apps/notifications/migrations/0002_classreminderdelivery_and_automated_sender.py b/apps/notifications/migrations/0002_classreminderdelivery_and_automated_sender.py
+index d971b85..f0d3271 100644
+--- a/apps/notifications/migrations/0002_classreminderdelivery_and_automated_sender.py
++++ b/apps/notifications/migrations/0002_classreminderdelivery_and_automated_sender.py
+@@ -8,7 +8,7 @@ class Migration(migrations.Migration):
+     dependencies = [
+         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+         ("notifications", "0001_initial"),
+-        ("timetable", "0002_timetableslot_lecturer_name_text"),
++        ("timetable", "0003_timetableslot_lecturer_name_text"),
+     ]
+ 
+     operations = [
+diff --git a/apps/schedule/services.py b/apps/schedule/services.py
+index 24e1865..1002fba 100644
+--- a/apps/schedule/services.py
++++ b/apps/schedule/services.py
+@@ -72,13 +72,13 @@ def generate_for_user(user) -> dict:
+         TimetableSlot.objects.select_related(
+             "unit", "program", "lecturer__user", "room", "term"
+         ).filter(term=term, unit_id__in=unit_ids)
+-        .order_by("day", "start_time")
++        .order_by("day_of_week", "start_time")
+     )
+ 
+     # ── 4. Group by day ────────────────────────────────────────────────────────
+     grouped: dict[str, list] = {day: [] for day in DAY_ORDER}
+     for slot in slots:
+-        grouped.setdefault(slot.day, []).append(_serialise_slot(slot))
++        grouped.setdefault(slot.day_of_week.upper(), []).append(_serialise_slot(slot))
+ 
+     # Sort each day by start_time
+     for day in grouped:
+@@ -87,7 +87,7 @@ def generate_for_user(user) -> dict:
+     # ── 5. Detect conflicts (two slots on same day overlapping in time) ────────
+     conflicts = []
+     for day, day_slots in grouped.items():
+-        raw_day_slots = [s for s in slots if s.day == day]
++        raw_day_slots = [s for s in slots if s.day_of_week.upper() == day]
+         for i, a in enumerate(raw_day_slots):
+             for b in raw_day_slots[i + 1:]:
+                 if _has_overlap(a, b):
+@@ -116,7 +116,7 @@ def _serialise_slot(slot: TimetableSlot) -> dict:
+         "id": str(slot.id),
+         "unit_code": slot.unit.code,
+         "unit_name": slot.unit.name,
+-        "day": slot.day,
++        "day": slot.day_of_week.upper(),
+         "start_time": slot.start_time.strftime("%H:%M"),
+         "end_time": slot.end_time.strftime("%H:%M"),
+         "room": slot.room.code if slot.room else None,
+diff --git a/apps/timetable/migrations/0003_timetableslot_lecturer_name_text.py b/apps/timetable/migrations/0003_timetableslot_lecturer_name_text.py
+new file mode 100644
+index 0000000..086854c
+--- /dev/null
++++ b/apps/timetable/migrations/0003_timetableslot_lecturer_name_text.py
+@@ -0,0 +1,18 @@
++# Generated by Django 5.1 on 2026-08-31 05:40
++
++from django.db import migrations, models
++
++
++class Migration(migrations.Migration):
++
++    dependencies = [
++        ('timetable', '0002_alter_timetableslot_lecturer'),
++    ]
++
++    operations = [
++        migrations.AddField(
++            model_name='timetableslot',
++            name='lecturer_name_text',
++            field=models.CharField(blank=True, default='', help_text='Fallback display name for the lecturer when no linked Lecturer account exists yet (e.g. parsed from a document but not yet matched to a registered account).', max_length=255),
++        ),
++    ]
+diff --git a/apps/timetable/models/timetable.py b/apps/timetable/models/timetable.py
+index 01aa9bb..8a931ce 100644
+--- a/apps/timetable/models/timetable.py
++++ b/apps/timetable/models/timetable.py
+@@ -73,6 +73,14 @@ class TimetableSlot(BaseModel):
+         null=True,
+         blank=True,
+     )
++    lecturer_name_text = models.CharField(
++        max_length=255,
++        blank=True,
++        default="",
++        help_text="Fallback display name for the lecturer when no linked "
++                  "Lecturer account exists yet (e.g. parsed from a document "
++                  "but not yet matched to a registered account).",
++    )
+     room = models.ForeignKey(
+         "rooms.Room",
+         on_delete=models.PROTECT,
+-- 
+2.43.0
+
