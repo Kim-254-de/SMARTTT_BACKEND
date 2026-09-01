@@ -30,9 +30,10 @@ def parse_timetable_file(file_path: str) -> list[dict]:
                 return parse_csv(f)
 
         if ext == ".pdf":
-            from apps.timetable.services.pdf_timetable_parser import parse_pdf
-            with open(file_path, "rb") as f:
-                return parse_pdf(f)
+            from apps.timetable.services.pdf_timetable_parser import parse_pdf, to_timetable_slot_dicts
+            # PDF parser returns a ParseResult; convert to list[dict]
+            result = parse_pdf(file_path)
+            return to_timetable_slot_dicts(result)
 
         if ext == ".docx":
             from apps.timetable.services.docx_timetable_parser import parse_docx
