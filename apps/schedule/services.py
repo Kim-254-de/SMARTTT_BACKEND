@@ -15,6 +15,7 @@ from collections import defaultdict
 
 from apps.courses.models import StudentUnit
 from apps.timetable.models import AcademicTerm, TimetableSlot
+from apps.timetable.utils.day_order import day_of_week_sort_case
 
 DAY_ORDER = ["MON", "TUE", "WED", "THU", "FRI", "SAT"]
 
@@ -72,7 +73,8 @@ def generate_for_user(user) -> dict:
         TimetableSlot.objects.select_related(
             "unit", "program", "lecturer__user", "room", "term"
         ).filter(term=term, unit_id__in=unit_ids)
-        .order_by("day_of_week", "start_time")
+        .annotate(_day_sort=day_of_week_sort_case())
+        .order_by("_day_sort", "start_time")
     )
 
     # ── 4. Group by day ────────────────────────────────────────────────────────

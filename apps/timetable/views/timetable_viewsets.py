@@ -50,12 +50,18 @@ class AcademicTermViewSet(ModelViewSet):
 class TimetableSlotViewSet(ModelViewSet):
     permission_classes = [CanManageTimetable]
     filterset_fields = ["term", "day_of_week", "room", "lecturer", "upload_batch"]
-    ordering_fields = ["term", "day_of_week", "start_time", "end_time"]
-    ordering = ["term", "day_of_week", "start_time"]
+    # Ordered by the annotated _day_sort (added in get_queryset below), not
+    # the raw day_of_week string, which sorts alphabetically (Fri before Mon).
+    ordering_fields = ["term", "_day_sort", "start_time", "end_time"]
+    ordering = ["term", "_day_sort", "start_time"]
     pagination_class = StandardResultsSetPagination
     
     def get_queryset(self):
-        """Get optimized queryset with proper select_related."""
+        """Get optimized queryset with proper select_related, ordered by
+        real calendar day (not alphabetically - day_of_week is a short
+        string like 'mon'/'tue', so a plain .order_by would show Friday's
+        slots before Monday's)."""
+        from apps.timetable.utils.day_order import day_of_week_sort_case
         return TimetableSlot.objects.select_related(
             "term",
             "unit",
@@ -65,7 +71,7 @@ class TimetableSlotViewSet(ModelViewSet):
             "room",
             "upload_batch",
             "upload_batch__uploaded_by"
-        ).all()
+        ).annotate(_day_sort=day_of_week_sort_case()).order_by("term", "_day_sort", "start_time")
     
     def get_serializer_class(self):
         """Return appropriate serializer based on action."""
