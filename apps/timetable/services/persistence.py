@@ -1,39 +1,26 @@
 from typing import List, Dict, Any, Tuple
+from datetime import date, timedelta
 from django.db import transaction
-from django.core.exceptions import ObjectDoesNotExist
 
 from apps.units.models import Unit
 from apps.programs.models import Program
-from apps.departments.models import Department
+from apps.departments.models import Department, Faculty
 from apps.lecturers.models import Lecturer
 from apps.rooms.models import Room
 from apps.timetable.models import AcademicTerm, TimetableSlot
-from apps.timetable.utils import (
-    DatabaseOperationException,
-    ResourceNotFoundException,
-    DuplicateSessionException,
-    TimetableLogger,
-)
+from apps.timetable.utils import TimetableLogger
 
 
 class TimetablePersistenceService:
     def __init__(self):
         """Initialize service with logging."""
         self.logger = TimetableLogger()
-    
-    @transaction.atomic
-    def save_rows(
-        self,
-        upload_batch,
-        rows: List[Dict[str, Any]]
-    ) -> Tuple[List[TimetableSlot], List[Dict[str, Any]]]:
-        saved_slots = []
-        errors = []
-        
-        # Per-batch caches: the same program/unit/room/lecturer/term codes
-        # commonly repeat across hundreds of rows in a real timetable upload,
-        # so cache lookups by code instead of re-querying the database on
-        # every single row.
+
+    def _preload_and_seed_cache(self, rows: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """
+        Pre-fetch all required foreign-key objects in bulk queries to eliminate
+        N+1 database round-trips during processing.
+        """
         cache = {
             "term": {},
             "department": {},
@@ -42,193 +29,185 @@ class TimetablePersistenceService:
             "room": {},
             "lecturer": {},
         }
-        
-        for idx, row in enumerate(rows, 1):
-            try:
-                # Each row gets its own savepoint so a genuine database-level
-                # error (e.g. a constraint violation) on one row can't poison
-                # the whole transaction and cascade-fail every row after it.
-                #
-                # Cache writes are only merged in AFTER the savepoint commits
-                # successfully - if we wrote to the shared cache mid-row and
-                # that row later failed for an unrelated reason (e.g. a bad
-                # room_code after a new Program/Unit was already created),
-                # the savepoint rollback would undo that Program/Unit, but
-                # the cache would still hold a dangling reference to it and
-                # poison every later row that shares that code.
-                pending_cache = {k: {} for k in cache}
-                with transaction.atomic():
-                    slot = self._get_or_create_slot(upload_batch, row, cache, pending_cache)
-                for section, entries in pending_cache.items():
-                    cache[section].update(entries)
-                saved_slots.append(slot)
-                
-            except DuplicateSessionException as e:
-                errors.append({
-                    "row_number": idx,
-                    "error": str(e),
-                    "error_code": "DUPLICATE_SESSION",
-                    "data": {k: v for k, v in row.items() if k not in ["start_time", "end_time"]}
-                })
-            except ResourceNotFoundException as e:
-                errors.append({
-                    "row_number": idx,
-                    "error": str(e),
-                    "error_code": "RESOURCE_NOT_FOUND",
-                    "data": {k: v for k, v in row.items() if k not in ["start_time", "end_time"]}
-                })
-            except Exception as e:
-                errors.append({
-                    "row_number": idx,
-                    "error": f"Unexpected error: {str(e)}",
-                    "error_code": "DATABASE_ERROR",
-                    "data": {k: v for k, v in row.items() if k not in ["start_time", "end_time"]}
-                })
-                self.logger.log_database_error(
-                    "CREATE_SLOT",
-                    str(e),
-                    upload_batch.id
-                )
-        
-        return saved_slots, errors
-    
-    def _get_or_create_slot(
-        self,
-        upload_batch,
-        row: Dict[str, Any],
-        cache: Dict[str, Dict[str, Any]] = None,
-        pending_cache: Dict[str, Dict[str, Any]] = None,
-    ) -> TimetableSlot:
-        if cache is None:
-            cache = {"term": {}, "department": {}, "program": {}, "unit": {}, "room": {}, "lecturer": {}}
-        if pending_cache is None:
-            pending_cache = {k: {} for k in cache}
 
-        # Get AcademicTerm
-        term_key = (row["academic_year"], row["semester"])
-        term = cache["term"].get(term_key)
-        if term is None:
-            try:
-                term = AcademicTerm.objects.get(
-                    academic_year=row["academic_year"],
-                    semester=row["semester"]
-                )
-            except AcademicTerm.DoesNotExist:
-                raise ResourceNotFoundException(
-                    f"Academic term not found: {row['academic_year']} S{row['semester']}"
-                )
-            pending_cache["term"][term_key] = term
+        # 1. Default Department & Faculty
+        default_faculty, _ = Faculty.objects.get_or_create(
+            code="GEN",
+            defaults={"name": "General Faculty"}
+        )
+        default_dept, _ = Department.objects.get_or_create(
+            code="COMP",
+            defaults={"name": "School of Computing", "faculty": default_faculty}
+        )
+        cache["department"]["comp"] = default_dept
 
-        # Get or create Department (for program/unit assignment)
-        department = cache["department"].get("COMP")
-        if department is None:
-            department = Department.objects.filter(code__iexact="COMP").first()
-            if not department:
-                from apps.departments.models import Faculty
-                default_faculty, _ = Faculty.objects.get_or_create(
-                    code="GEN",
-                    defaults={"name": "General"}
+        # 2. Academic Terms
+        term_pairs = {(r["academic_year"], int(r["semester"])) for r in rows if r.get("academic_year") and r.get("semester")}
+        for year, sem in term_pairs:
+            term = AcademicTerm.objects.filter(academic_year=year, semester=sem).first()
+            if not term:
+                today = date.today()
+                term = AcademicTerm.objects.create(
+                    academic_year=year,
+                    semester=sem,
+                    start_date=today,
+                    end_date=today + timedelta(days=120),
+                    is_current=False,
                 )
-                department, _ = Department.objects.get_or_create(
-                    code="COMP",
-                    defaults={"name": "School of Computing", "faculty": default_faculty}
-                )
-            pending_cache["department"]["COMP"] = department
-            
-        # Get or create Program
-        program_code = row["program_code"]
-        program_key = program_code.lower()
-        program = cache["program"].get(program_key)
-        if program is None:
-            program = Program.objects.filter(code__iexact=program_code).first()
-            if not program:
-                program = Program.objects.create(
-                    code=program_code[:64],
-                    name=f"Program {program_code}"[:255],
-                    department=department,
+            cache["term"][(year, sem)] = term
+
+        # 3. Programs
+        program_codes = {str(r["program_code"]).strip() for r in rows if r.get("program_code")}
+        existing_programs = Program.objects.filter(code__in=program_codes)
+        for p in existing_programs:
+            cache["program"][p.code.lower()] = p
+
+        missing_p_codes = [c for c in program_codes if c.lower() not in cache["program"]]
+        if missing_p_codes:
+            new_programs = [
+                Program(
+                    code=c[:64],
+                    name=f"Program {c}"[:255],
+                    department=default_dept,
                     duration_years=4
                 )
-            pending_cache["program"][program_key] = program
-            
-        # Get or create Unit
-        unit_code = row["unit_code"]
-        unit_key = unit_code.lower()
-        unit = cache["unit"].get(unit_key)
-        if unit is None:
-            unit = Unit.objects.filter(code__iexact=unit_code).first()
-            if not unit:
-                unit_name = row.get("unit_name") or unit_code
-                unit = Unit.objects.create(
-                    code=unit_code[:64],
-                    name=unit_name[:255],
-                    credit_hours=3.0,
-                    department=department
-                )
-            pending_cache["unit"][unit_key] = unit
-        
-        # Get Room
-        room_key = row["room_code"]
-        room = cache["room"].get(room_key)
-        if room is None:
-            try:
-                room = Room.objects.get(code=row["room_code"])
-            except Room.DoesNotExist:
-                raise ResourceNotFoundException(
-                    f"Room not found: {row['room_code']}"
-                )
-            pending_cache["room"][room_key] = room
-        
-        # Get Lecturer (optional — a slot can exist before a lecturer is
-        # assigned; assignment happens later via the allocation upload)
-        lecturer_university_id = str(row.get("lecturer_university_id") or "").strip()
-        lecturer = None
-        if lecturer_university_id:
-            lecturer = cache["lecturer"].get(lecturer_university_id)
-            if lecturer is None:
-                try:
-                    lecturer = Lecturer.objects.select_related("user").get(
-                        user__university_id=lecturer_university_id
-                    )
-                except Lecturer.DoesNotExist:
-                    raise ResourceNotFoundException(
-                        f"Lecturer not found: {lecturer_university_id}"
-                    )
-                pending_cache["lecturer"][lecturer_university_id] = lecturer
-        
-        # Check for duplicate
-        existing = TimetableSlot.objects.filter(
-            term=term,
-            unit=unit,
-            program=program,
-            year_of_study=row["year_of_study"],
-            lecturer=lecturer,
-            room=room,
-            day_of_week=row["day_of_week"],
-            start_time=row["start_time"],
-            end_time=row["end_time"],
-            class_group=row["class_group"],
-        ).exists()
-        
-        if existing:
-            raise DuplicateSessionException(
-                f"Duplicate session: {unit.code} "
-                f"{row['day_of_week']} {row['start_time']}-{row['end_time']}"
-            )
-        
-        # Create new slot
-        slot = TimetableSlot.objects.create(
-            term=term,
-            unit=unit,
-            program=program,
-            year_of_study=row["year_of_study"],
-            lecturer=lecturer,
-            room=room,
-            day_of_week=row["day_of_week"],
-            start_time=row["start_time"],
-            end_time=row["end_time"],
-            class_group=row["class_group"],
-            upload_batch=upload_batch,
-        )
-        
-        return slot
+                for c in missing_p_codes
+            ]
+            Program.objects.bulk_create(new_programs, ignore_conflicts=True)
+            for p in Program.objects.filter(code__in=missing_p_codes):
+                cache["program"][p.code.lower()] = p
 
+        # 4. Units
+        unit_codes = {str(r["unit_code"]).strip() for r in rows if r.get("unit_code")}
+        existing_units = Unit.objects.filter(code__in=unit_codes)
+        for u in existing_units:
+            cache["unit"][u.code.lower()] = u
+
+        missing_u_codes = [c for c in unit_codes if c.lower() not in cache["unit"]]
+        if missing_u_codes:
+            new_units = [
+                Unit(
+                    code=c[:64],
+                    name=c[:255],
+                    credit_hours=3.0,
+                    department=default_dept
+                )
+                for c in missing_u_codes
+            ]
+            Unit.objects.bulk_create(new_units, ignore_conflicts=True)
+            for u in Unit.objects.filter(code__in=missing_u_codes):
+                cache["unit"][u.code.lower()] = u
+
+        # 5. Rooms
+        room_codes = {str(r["room_code"]).strip() for r in rows if r.get("room_code")}
+        existing_rooms = Room.objects.filter(code__in=room_codes)
+        for rm in existing_rooms:
+            cache["room"][rm.code.lower()] = rm
+
+        missing_r_codes = [c for c in room_codes if c.lower() not in cache["room"]]
+        if missing_r_codes:
+            new_rooms = [
+                Room(
+                    code=c[:20],
+                    name=c[:100],
+                    capacity=50,
+                )
+                for c in missing_r_codes
+            ]
+            Room.objects.bulk_create(new_rooms, ignore_conflicts=True)
+            for rm in Room.objects.filter(code__in=missing_r_codes):
+                cache["room"][rm.code.lower()] = rm
+
+        # 6. Lecturers (optional)
+        lecturer_ids = {
+            str(r["lecturer_university_id"]).strip()
+            for r in rows
+            if r.get("lecturer_university_id") and str(r["lecturer_university_id"]).strip()
+        }
+        if lecturer_ids:
+            existing_lecturers = Lecturer.objects.select_related("user").filter(
+                user__university_id__in=lecturer_ids
+            )
+            for lec in existing_lecturers:
+                if lec.user and lec.user.university_id:
+                    cache["lecturer"][lec.user.university_id.lower()] = lec
+
+        return cache
+
+    @transaction.atomic
+    def save_rows(
+        self,
+        upload_batch,
+        rows: List[Dict[str, Any]]
+    ) -> Tuple[List[TimetableSlot], List[Dict[str, Any]]]:
+        if not rows:
+            return [], []
+
+        # 1. Preload all entities in bulk
+        cache = self._preload_and_seed_cache(rows)
+
+        slots_to_create = []
+        errors = []
+        seen_slot_keys = set()
+
+        # 2. Map rows to model instances in memory
+        for idx, row in enumerate(rows, start=1):
+            try:
+                term_key = (row["academic_year"], int(row["semester"]))
+                term = cache["term"].get(term_key)
+                if not term:
+                    errors.append({"row_number": idx, "error": f"Academic term missing: {term_key}"})
+                    continue
+
+                program = cache["program"].get(str(row["program_code"]).strip().lower())
+                unit = cache["unit"].get(str(row["unit_code"]).strip().lower())
+                room = cache["room"].get(str(row["room_code"]).strip().lower())
+
+                lec_id = str(row.get("lecturer_university_id") or "").strip().lower()
+                lecturer = cache["lecturer"].get(lec_id) if lec_id else None
+
+                day_val = str(row.get("day_of_week") or "").strip().upper()[:3]
+                start_time_val = str(row.get("start_time") or "")
+                end_time_val = str(row.get("end_time") or "")
+                class_group_val = str(row.get("class_group") or "MAIN")
+                year_of_study_val = int(row.get("year_of_study") or 1)
+
+                slot_dedup_key = (
+                    term.id,
+                    program.id if program else None,
+                    unit.id if unit else None,
+                    year_of_study_val,
+                    day_val,
+                    start_time_val,
+                    end_time_val,
+                    room.id if room else None,
+                    class_group_val,
+                )
+
+                if slot_dedup_key in seen_slot_keys:
+                    continue
+                seen_slot_keys.add(slot_dedup_key)
+
+                slot = TimetableSlot(
+                    term=term,
+                    unit=unit,
+                    program=program,
+                    year_of_study=year_of_study_val,
+                    lecturer=lecturer,
+                    room=room,
+                    day_of_week=day_val,
+                    start_time=start_time_val,
+                    end_time=end_time_val,
+                    class_group=class_group_val,
+                    upload_batch=upload_batch,
+                )
+                slots_to_create.append(slot)
+
+            except Exception as e:
+                errors.append({"row_number": idx, "error": f"Row processing error: {str(e)}"})
+
+        # 3. Fast Bulk Insertion
+        if slots_to_create:
+            TimetableSlot.objects.bulk_create(slots_to_create, batch_size=500, ignore_conflicts=True)
+
+        return slots_to_create, errors
