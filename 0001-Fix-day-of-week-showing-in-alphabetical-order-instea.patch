@@ -1,0 +1,164 @@
+From 8650ba2cbb52ed25d48a8329f17c6f7c61bda9e4 Mon Sep 17 00:00:00 2001
+From: Emmanuel Kimathi <kimathi@example.com>
+Date: Tue, 1 Sep 2026 09:40:45 +0000
+Subject: [PATCH] Fix day-of-week showing in alphabetical order instead of
+ calendar order
+
+day_of_week is stored as a short string ('mon', 'tue', 'wed', ...), so
+anywhere it was used directly in .order_by() or as a model/viewset's
+default ordering, the actual displayed order was alphabetical - Friday,
+Monday, Saturday, Thursday, Tuesday, Wednesday - not real week order.
+This showed up in all three places you're using: Django admin's
+TimetableSlot list, the admin.html-facing API (TimetableSlotViewSet),
+and the student schedule endpoint that feeds the Flutter app.
+
+Added a reusable day_of_week_sort_case() helper (apps/timetable/utils/
+day_order.py) that maps each day to its real calendar position via a
+Case/When annotation, and applied it in the three places that needed
+it:
+- TimetableSlotAdmin.get_queryset() - Django admin's list view
+- TimetableSlotViewSet.get_queryset() - also had to repoint the
+  viewset's DRF ordering_fields/ordering at the new annotated field,
+  since DEFAULT_FILTER_BACKENDS includes OrderingFilter globally,
+  which would otherwise re-sort alphabetically on top of the fix
+- schedule/services.py's underlying slots query (the returned
+  timetable dict's key order was already correct via the pre-defined
+  DAY_ORDER list regardless, but the raw query is now consistent too)
+
+Left TimetableSession's selectors/viewset (apps/timetable/selectors/
+timetable_selectors.py, apps/timetable/views/viewsets.py) with the
+same underlying issue unfixed for now - that's a separate, parallel
+model that the live upload pipeline (what actually powers the admin
+upload button and student schedule sync) doesn't create or touch, so
+it's out of scope here unless it turns out to be used elsewhere.
+
+Verified with data deliberately created in scrambled day order (fri,
+mon, sat, wed, tue, thu) - confirmed correct chronological output from
+Django admin's queryset, the viewset's get_queryset, the same viewset
+AFTER Django REST Framework's OrderingFilter is applied on top
+(simulating a real API request), and generate_for_user()'s response.
+---
+ apps/schedule/services.py                  |  4 ++-
+ apps/timetable/admin.py                    |  8 ++++++
+ apps/timetable/utils/day_order.py          | 29 ++++++++++++++++++++++
+ apps/timetable/views/timetable_viewsets.py | 14 ++++++++---
+ 4 files changed, 50 insertions(+), 5 deletions(-)
+ create mode 100644 apps/timetable/utils/day_order.py
+
+diff --git a/apps/schedule/services.py b/apps/schedule/services.py
+index 1002fba..71decc4 100644
+--- a/apps/schedule/services.py
++++ b/apps/schedule/services.py
+@@ -15,6 +15,7 @@ from collections import defaultdict
+ 
+ from apps.courses.models import StudentUnit
+ from apps.timetable.models import AcademicTerm, TimetableSlot
++from apps.timetable.utils.day_order import day_of_week_sort_case
+ 
+ DAY_ORDER = ["MON", "TUE", "WED", "THU", "FRI", "SAT"]
+ 
+@@ -72,7 +73,8 @@ def generate_for_user(user) -> dict:
+         TimetableSlot.objects.select_related(
+             "unit", "program", "lecturer__user", "room", "term"
+         ).filter(term=term, unit_id__in=unit_ids)
+-        .order_by("day_of_week", "start_time")
++        .annotate(_day_sort=day_of_week_sort_case())
++        .order_by("_day_sort", "start_time")
+     )
+ 
+     # ── 4. Group by day ────────────────────────────────────────────────────────
+diff --git a/apps/timetable/admin.py b/apps/timetable/admin.py
+index 2020516..47a53e7 100644
+--- a/apps/timetable/admin.py
++++ b/apps/timetable/admin.py
+@@ -1,5 +1,6 @@
+ from django.contrib import admin
+ from .models import AcademicTerm, TimetableSlot
++from .utils.day_order import day_of_week_sort_case
+ 
+ 
+ @admin.register(AcademicTerm)
+@@ -11,3 +12,10 @@ class TimetableSlotAdmin(admin.ModelAdmin):
+     list_display = ["unit", "program", "year_of_study", "day_of_week", "start_time", "end_time", "room", "term"]
+     list_filter = ["term", "day_of_week", "program"]
+     search_fields = ["unit__code", "unit__name"]
++
++    def get_queryset(self, request):
++        # day_of_week is a short string ('mon','tue',...) so the default
++        # alphabetical ordering shows Friday's slots before Monday's -
++        # sort by real calendar day order instead.
++        qs = super().get_queryset(request)
++        return qs.annotate(_day_sort=day_of_week_sort_case()).order_by("_day_sort", "start_time")
+diff --git a/apps/timetable/utils/day_order.py b/apps/timetable/utils/day_order.py
+new file mode 100644
+index 0000000..1513ff0
+--- /dev/null
++++ b/apps/timetable/utils/day_order.py
+@@ -0,0 +1,29 @@
++"""
++day_of_week is stored as a short string ('mon', 'tue', ...), so ordering
++by it directly sorts alphabetically (fri, mon, sat, thu, tue, wed) rather
++than calendar order. day_of_week_sort_case() gives an annotation that
++sorts it correctly - use it wherever timetable slots/sessions need to be
++listed or displayed in real week order (Monday through Saturday).
++"""
++from django.db.models import Case, IntegerField, Value, When
++
++DAY_OF_WEEK_ORDER = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
++
++
++def day_of_week_sort_case(field_name="day_of_week"):
++    """
++    Returns a Case expression mapping day_of_week values to their real
++    calendar position (Monday=0 ... Sunday=6), for use in .annotate() +
++    .order_by(), e.g.:
++
++        queryset.annotate(_day_sort=day_of_week_sort_case()) \\
++                .order_by("_day_sort", "start_time")
++
++    field_name lets this be reused for a related field too, e.g.
++    day_of_week_sort_case("time_slot__day_of_week").
++    """
++    return Case(
++        *[When(**{field_name: day}, then=Value(i)) for day, i in DAY_OF_WEEK_ORDER.items()],
++        default=Value(99),
++        output_field=IntegerField(),
++    )
+diff --git a/apps/timetable/views/timetable_viewsets.py b/apps/timetable/views/timetable_viewsets.py
+index 2e0fd87..e31b21b 100644
+--- a/apps/timetable/views/timetable_viewsets.py
++++ b/apps/timetable/views/timetable_viewsets.py
+@@ -50,12 +50,18 @@ class AcademicTermViewSet(ModelViewSet):
+ class TimetableSlotViewSet(ModelViewSet):
+     permission_classes = [CanManageTimetable]
+     filterset_fields = ["term", "day_of_week", "room", "lecturer", "upload_batch"]
+-    ordering_fields = ["term", "day_of_week", "start_time", "end_time"]
+-    ordering = ["term", "day_of_week", "start_time"]
++    # Ordered by the annotated _day_sort (added in get_queryset below), not
++    # the raw day_of_week string, which sorts alphabetically (Fri before Mon).
++    ordering_fields = ["term", "_day_sort", "start_time", "end_time"]
++    ordering = ["term", "_day_sort", "start_time"]
+     pagination_class = StandardResultsSetPagination
+     
+     def get_queryset(self):
+-        """Get optimized queryset with proper select_related."""
++        """Get optimized queryset with proper select_related, ordered by
++        real calendar day (not alphabetically - day_of_week is a short
++        string like 'mon'/'tue', so a plain .order_by would show Friday's
++        slots before Monday's)."""
++        from apps.timetable.utils.day_order import day_of_week_sort_case
+         return TimetableSlot.objects.select_related(
+             "term",
+             "unit",
+@@ -65,7 +71,7 @@ class TimetableSlotViewSet(ModelViewSet):
+             "room",
+             "upload_batch",
+             "upload_batch__uploaded_by"
+-        ).all()
++        ).annotate(_day_sort=day_of_week_sort_case()).order_by("term", "_day_sort", "start_time")
+     
+     def get_serializer_class(self):
+         """Return appropriate serializer based on action."""
+-- 
+2.43.0
+
