@@ -10,11 +10,10 @@ python-dotenv==1.0.1
 argon2-cffi==25.1.0
 pandas==2.3.3
 openpyxl==3.1.5
-pdfplumber==0.11.4
+pdfplumber>=0.11.10
 requests==2.32.3
 beautifulsoup4==4.13.4
-Pillow==11.2.1
-resend
+Pillow>=12.2.0
 gunicorn==26.0.0
 google-auth==2.40.3
 resend

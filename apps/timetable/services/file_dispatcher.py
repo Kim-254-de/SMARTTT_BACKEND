@@ -1,47 +1,45 @@
 """
-Dispatches a timetable upload to the right format-specific parser based on
-file extension, and normalises exceptions into ExcelParsingException so the
-pipeline's existing error handling covers every format uniformly.
+timetable/services/file_dispatcher.py
+
+Routes timetable files (.xlsx, .xls, .csv, .pdf, .docx) to their respective parsers.
 """
-from __future__ import annotations
 
 import os
+from typing import List, Dict, Any
 
+from apps.timetable.services.excel_parser import parse_excel
+from apps.timetable.services.pdf_timetable_parser import parse_pdf, to_timetable_slot_dicts
+from apps.timetable.services.docx_timetable_parser import parse_docx
 from apps.timetable.utils import ExcelParsingException
 
 
-def parse_timetable_file(file_path: str) -> list[dict]:
+def parse_timetable_file(file_path: str, academic_year: str = "2026/2027") -> List[Dict[str, Any]]:
     """
-    Parse a timetable file (.xlsx, .xls, .csv, .pdf, .docx) into a list of
-    normalised row dicts using canonical column names (program_code,
-    room_code, lecturer_university_id, day_of_week, etc).
+    Parse any supported timetable file format into normalized dictionary rows.
     """
+    if not os.path.exists(file_path):
+        raise ExcelParsingException(f"File not found: {file_path}")
+
     _, ext = os.path.splitext(file_path.lower())
 
     try:
-        if ext in (".xlsx", ".xls"):
-            from apps.timetable.services.excel_parser import parse_excel
+        if ext in (".xlsx", ".xls", ".csv"):
             with open(file_path, "rb") as f:
                 return parse_excel(f)
 
-        if ext == ".csv":
-            from apps.timetable.services.excel_parser import parse_csv
-            with open(file_path, "rb") as f:
-                return parse_csv(f)
+        elif ext == ".pdf":
+            parsed_result = parse_pdf(file_path)
+            return to_timetable_slot_dicts(parsed_result, academic_year=academic_year)
 
-        if ext == ".pdf":
-            from apps.timetable.services.pdf_timetable_parser import parse_pdf, to_timetable_slot_dicts
-            # PDF parser returns a ParseResult; convert to list[dict]
-            result = parse_pdf(file_path)
-            return to_timetable_slot_dicts(result)
-
-        if ext == ".docx":
-            from apps.timetable.services.docx_timetable_parser import parse_docx
+        elif ext == ".docx":
             return parse_docx(file_path)
 
-        raise ExcelParsingException(f"Unsupported file extension: {ext}")
-
+        else:
+            raise ExcelParsingException(
+                f"Unsupported file extension: {ext}. "
+                "Supported formats are .xlsx, .xls, .csv, .pdf, and .docx."
+            )
     except ExcelParsingException:
         raise
-    except Exception as exc:
-        raise ExcelParsingException(str(exc)) from exc
+    except Exception as e:
+        raise ExcelParsingException(f"Failed to parse timetable file ({ext}): {str(e)}")
