@@ -28,6 +28,23 @@ _UNIT_ONLY_RE = re.compile(r"^[A-Z]{2,6}\d{3,6}$")
 _UNIT_SPLIT_RE = re.compile(r"^([A-Z]+)(\d+)$")
 _COHORT_RE = re.compile(r"^(?P<program>.+?)\s+Y(?P<year>\d+)S(?P<sem>\d+)$", re.IGNORECASE)
 
+DAY_MAP = {
+    "mon": "Monday",
+    "monday": "Monday",
+    "tue": "Tuesday",
+    "tuesday": "Tuesday",
+    "wed": "Wednesday",
+    "wednesday": "Wednesday",
+    "thu": "Thursday",
+    "thursday": "Thursday",
+    "fri": "Friday",
+    "friday": "Friday",
+    "sat": "Saturday",
+    "saturday": "Saturday",
+    "sun": "Sunday",
+    "sunday": "Sunday",
+}
+
 
 @dataclass
 class RawSlot:
@@ -379,6 +396,10 @@ def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027
             start_time_str = "07:00"
             end_time_str = "08:00"
 
+        # Resolve full Title-case day name (e.g. "Monday") to match Django Model Choices
+        raw_day = str(s.day or "").strip().lower()
+        full_day = DAY_MAP.get(raw_day, DAY_MAP.get(raw_day[:3], s.day.capitalize() if s.day else "Monday"))
+
         out.append({
             "academic_year": academic_year,
             "semester": semester,
@@ -386,7 +407,7 @@ def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027
             "program_code": program_code[:64],
             "unit_code": normalise_unit_code(s.unit_code_raw),
             "class_group": "MAIN",
-            "day_of_week": s.day.strip().lower()[:3],
+            "day_of_week": full_day,
             "start_time": start_time_str,
             "end_time": end_time_str,
             "room_code": room_code[:20],

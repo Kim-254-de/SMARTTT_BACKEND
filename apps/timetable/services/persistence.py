@@ -10,6 +10,23 @@ from apps.rooms.models import Room
 from apps.timetable.models import AcademicTerm, TimetableSlot
 from apps.timetable.utils import TimetableLogger
 
+DAY_MAP = {
+    "mon": "Monday",
+    "monday": "Monday",
+    "tue": "Tuesday",
+    "tuesday": "Tuesday",
+    "wed": "Wednesday",
+    "wednesday": "Wednesday",
+    "thu": "Thursday",
+    "thursday": "Thursday",
+    "fri": "Friday",
+    "friday": "Friday",
+    "sat": "Saturday",
+    "saturday": "Saturday",
+    "sun": "Sunday",
+    "sunday": "Sunday",
+}
+
 
 class TimetablePersistenceService:
     def __init__(self):
@@ -166,7 +183,10 @@ class TimetablePersistenceService:
                 lec_id = str(row.get("lecturer_university_id") or "").strip().lower()
                 lecturer = cache["lecturer"].get(lec_id) if lec_id else None
 
-                day_val = str(row.get("day_of_week") or "").strip().upper()[:3]
+                # Store full Title-case day name matching model choices (e.g., 'Monday')
+                raw_day_str = str(row.get("day_of_week") or row.get("day") or "").strip().lower()
+                day_val = DAY_MAP.get(raw_day_str, DAY_MAP.get(raw_day_str[:3], raw_day_str.capitalize() if raw_day_str else "Monday"))
+
                 start_time_val = str(row.get("start_time") or "")
                 end_time_val = str(row.get("end_time") or "")
                 class_group_val = str(row.get("class_group") or "MAIN")
