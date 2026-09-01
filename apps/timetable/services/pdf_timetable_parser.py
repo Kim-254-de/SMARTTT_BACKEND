@@ -169,6 +169,9 @@ def parse_pdf(path: str) -> ParseResult:
     tables that actually start with a day-name row update the column
     mapping, everything else is treated as cohort data using whatever
     header was last seen. See module docstring.
+    
+    IMPORTANT: For large PDFs, use parse_pdf_streaming() instead for
+    memory efficiency.
     """
     result = ParseResult()
     col_to_day: dict[int, str] = {}
@@ -291,6 +294,162 @@ def parse_pdf(path: str) -> ParseResult:
                         col = span_end + 1
 
     return result
+
+
+def parse_pdf_streaming(path: str, chunk_callback=None, chunk_size: int = 50):
+    """
+    Parse a TUN master-timetable PDF into RawSlot rows using a streaming/chunking
+    approach. This is MUCH more memory-efficient for large PDFs.
+    
+    Args:
+        path: Path to PDF file
+        chunk_callback: Optional callback function(slots: list[RawSlot], page: int, table: int) 
+                       called for each batch of slots. If provided, allows processing
+                       slots without keeping all in memory.
+        chunk_size: Number of slots to accumulate before calling callback (default 50)
+        
+    Yields:
+        Tuple of (RawSlot list, page index, table index) if no callback provided
+        Returns full ParseResult with warnings if callback is provided
+    """
+    slots = []
+    warnings = []
+    col_to_day: dict[int, str] = {}
+    col_to_hour_label: dict[int, str] = {}
+    table_counter = 0
+
+    with pdfplumber.open(path) as pdf:
+        for page_index, page in enumerate(pdf.pages, start=1):
+            tables = page.find_tables()
+            if not tables:
+                continue
+
+            tables = sorted(tables, key=lambda t: t.bbox[1])
+
+            for table in tables:
+                table_counter += 1
+                data = table.extract()
+                if not data:
+                    continue
+
+                if _is_header_row(data[0]):
+                    if len(data) < 2:
+                        warnings.append(
+                            f"page {page_index}: header table #{table_counter} "
+                            f"with no hour-label row"
+                        )
+                        continue
+                    header_day_row, header_hour_row = data[0], data[1]
+                    col_to_day, col_to_hour_label = _build_column_maps(
+                        header_day_row, header_hour_row
+                    )
+                    data_rows = data[2:]
+                else:
+                    data_rows = data
+
+                if not col_to_day:
+                    warnings.append(
+                        f"page {page_index}: cohort data encountered before any header "
+                        f"was parsed; skipping table #{table_counter}"
+                    )
+                    continue
+
+                for row in data_rows:
+                    if not row or not row[0]:
+                        continue
+                    cohort_label = _clean_cell_text(row[0])
+                    if not cohort_label:
+                        continue
+
+                    col = 1
+                    n_cols = len(row)
+                    while col < n_cols:
+                        cell = row[col]
+
+                        if cell is None:
+                            col += 1
+                            continue
+
+                        text = _clean_cell_text(cell) if cell else ""
+                        if not text:
+                            col += 1
+                            continue
+
+                        span_end = col
+                        day = col_to_day.get(col)
+                        while (
+                            span_end + 1 < n_cols
+                            and row[span_end + 1] is None
+                            and col_to_day.get(span_end + 1) == day
+                        ):
+                            span_end += 1
+
+                        start_label = col_to_hour_label.get(col)
+                        end_label = col_to_hour_label.get(span_end)
+                        if not (day and start_label and end_label):
+                            warnings.append(
+                                f"page {page_index}: could not resolve day/time for "
+                                f"cohort={cohort_label!r} col={col} text={text!r}"
+                            )
+                            col = span_end + 1
+                            continue
+
+                        start_time, _ = _hour_bounds(start_label)
+                        _, end_time = _hour_bounds(end_label)
+
+                        despaced = re.sub(r"\s+", "", text)
+                        venue_unit, venue, room = _split_unit_and_venue(despaced)
+                        if venue is None and span_end + 1 < n_cols:
+                            peek = row[span_end + 1]
+                            if peek and re.fullmatch(r"\d{1,3}", peek.strip()):
+                                despaced2 = despaced + peek.strip()
+                                venue_unit2, venue2, room2 = _split_unit_and_venue(despaced2)
+                                if venue2:
+                                    venue_unit, venue, room = venue_unit2, venue2, room2
+                                    span_end += 1
+
+                        raw_slot = RawSlot(
+                            cohort_label=cohort_label,
+                            day=day,
+                            start_time=start_time,
+                            end_time=end_time,
+                            unit_code_raw=venue_unit,
+                            venue=venue,
+                            room=room,
+                            page=page_index,
+                            raw_cell_text=text,
+                        )
+                        slots.append(raw_slot)
+
+                        if venue is None:
+                            warnings.append(
+                                f"page {page_index}: no venue parsed for "
+                                f"cohort={cohort_label!r} text={text!r} (kept unit_code only)"
+                            )
+
+                        col = span_end + 1
+
+                        # Flush batch if reached chunk_size
+                        if len(slots) >= chunk_size:
+                            if chunk_callback:
+                                chunk_callback(slots[:], page_index, table_counter)
+                            else:
+                                yield slots[:], page_index, table_counter
+                            slots = []
+
+    # Final flush
+    if slots:
+        if chunk_callback:
+            chunk_callback(slots, page_index, table_counter)
+        else:
+            yield slots, page_index, table_counter
+
+    # Return warnings via callback or as generator final message
+    if chunk_callback:
+        return ParseResult(slots=[], warnings=warnings)
+    else:
+        yield [], -1, -1  # Sentinel to indicate end
+        return ParseResult(slots=[], warnings=warnings)
 
 
 def to_timetable_slot_dicts(result: ParseResult) -> list[dict]:
