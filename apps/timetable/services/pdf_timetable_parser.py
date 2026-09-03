@@ -29,20 +29,13 @@ _UNIT_SPLIT_RE = re.compile(r"^([A-Z]+)(\d+)$")
 _COHORT_RE = re.compile(r"^(?P<program>.+?)\s+Y(?P<year>\d+)S(?P<sem>\d+)$", re.IGNORECASE)
 
 DAY_MAP = {
-    "mon": "Monday",
-    "monday": "Monday",
-    "tue": "Tuesday",
-    "tuesday": "Tuesday",
-    "wed": "Wednesday",
-    "wednesday": "Wednesday",
-    "thu": "Thursday",
-    "thursday": "Thursday",
-    "fri": "Friday",
-    "friday": "Friday",
-    "sat": "Saturday",
-    "saturday": "Saturday",
-    "sun": "Sunday",
-    "sunday": "Sunday",
+    "mon": "mon", "monday": "mon",
+    "tue": "tue", "tuesday": "tue",
+    "wed": "wed", "wednesday": "wed",
+    "thu": "thu", "thursday": "thu",
+    "fri": "fri", "friday": "fri",
+    "sat": "sat", "saturday": "sat",
+    "sun": "sun", "sunday": "sun",
 }
 
 
@@ -367,10 +360,6 @@ def parse_pdf_streaming(path: str, chunk_callback=None, chunk_size: int = 50):
 
 
 def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027") -> list[dict]:
-    """
-    Transform raw parsed PDF slots into the normalized dictionary schema
-    required by TimetableUploadValidator and TimetableUploadPipelineService.
-    """
     out = []
     for s in result.slots:
         program_code = s.cohort_label
@@ -396,9 +385,9 @@ def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027
             start_time_str = "07:00"
             end_time_str = "08:00"
 
-        # Resolve full Title-case day name (e.g. "Monday") to match Django Model Choices
+        # Always emit lowercase 3-letter code (e.g. 'mon', 'tue')
         raw_day = str(s.day or "").strip().lower()
-        full_day = DAY_MAP.get(raw_day, DAY_MAP.get(raw_day[:3], s.day.capitalize() if s.day else "Monday"))
+        code_day = DAY_MAP.get(raw_day, raw_day[:3])
 
         out.append({
             "academic_year": academic_year,
@@ -407,7 +396,7 @@ def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027
             "program_code": program_code[:64],
             "unit_code": normalise_unit_code(s.unit_code_raw),
             "class_group": "MAIN",
-            "day_of_week": full_day,
+            "day_of_week": code_day,
             "start_time": start_time_str,
             "end_time": end_time_str,
             "room_code": room_code[:20],
