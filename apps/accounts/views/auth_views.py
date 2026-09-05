@@ -5,6 +5,7 @@ import secrets
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
@@ -163,10 +164,23 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        email = request.data.get('email')
+        login_id = str(request.data.get('email') or request.data.get('username') or '').strip()
         password = request.data.get('password')
 
-        user = authenticate(username=email, password=password)
+        if not login_id or not password:
+            return Response({"detail": "Username/email and password are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Look up user by email or username first
+        user_obj = User.objects.filter(
+            Q(email__iexact=login_id) | Q(username__iexact=login_id)
+        ).first()
+
+        user = None
+        if user_obj:
+            user = authenticate(username=user_obj.username, password=password)
+        else:
+            user = authenticate(username=login_id, password=password)
+
         if user is None:
             return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
 
