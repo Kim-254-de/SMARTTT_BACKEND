@@ -10,12 +10,11 @@ from apps.core.models import Program
 from apps.courses.models import StudentUnit
 
 from .fcm_service import send_to_tokens
-from .models import FCMToken, Notification, StudentNotification
+from .models import FCMToken, Notification, NotificationType, StudentNotification, Target
 from .serializers import (
-    FCMTokenSerializer, NotificationSerializer,
+    FCMTokenSerializer, LecturerVenueChangeSerializer, NotificationSerializer,
     SendNotificationSerializer, StudentNotificationSerializer,
 )
-
 
 class RegisterFCMTokenView(APIView):
     """
@@ -55,7 +54,7 @@ class SendNotificationView(APIView):
         title = d["title"]
         message = d["message"]
         target = d["target"]
-        notification_type = d.get("notification_type", Notification.Type.GENERAL)
+        notification_type = d.get("notification_type", NotificationType.GENERAL)
         target_program_id = d.get("target_program")
         target_year = d.get("target_year")
 
@@ -68,16 +67,16 @@ class SendNotificationView(APIView):
                 return Response({"detail": "Program not found."}, status=400)
 
         # ── Resolve recipient users ───────────────────────────────────────────
-        if target == Notification.Target.ALL:
+        if target == Target.ALL:
             users = User.objects.filter(is_active=True, role=User.Role.STUDENT)
-        elif target == Notification.Target.PROGRAM and target_program:
+        elif target == Target.PROGRAM and target_program:
             # Students who have units under this program
             unit_ids = target_program.timetable_slots.values_list("unit_id", flat=True)
             student_ids = StudentUnit.objects.filter(
                 unit_id__in=unit_ids
             ).values_list("user_id", flat=True)
             users = User.objects.filter(id__in=student_ids, is_active=True)
-        elif target == Notification.Target.YEAR and target_year:
+        elif target == Target.YEAR and target_year:
             # Students in a specific year — we check their StudentUnit term slots
             from apps.timetable.models import TimetableSlot, AcademicTerm
             term = AcademicTerm.objects.filter(is_current=True).first()
@@ -216,15 +215,25 @@ class LecturerSendNotificationView(APIView):
 
         title = request.data.get("title", "").strip()
         message = request.data.get("message", "").strip()
-        notification_type = request.data.get("notification_type", "general")
+        notification_type = request.data.get("notification_type", NotificationType.GENERAL)
         unit_id = request.data.get("unit_id", "").strip()
+        new_venue = None
+        expected_students = None
 
-        if not title or not message:
-            return Response({"detail": "Title and message are required."}, status=400)
-
-        if not unit_id:
-            return Response({"detail": "unit_id is required."}, status=400)
-
+        if notification_type == NotificationType.VENUE_CHANGE:
+            s = LecturerVenueChangeSerializer(data=request.data)
+            s.is_valid(raise_exception=True)  # returns 400 with capacity_error + suggested_rooms
+            d = s.validated_data
+            title = d["title"]
+            message = d["message"]
+            unit_id = d["unit_id"]
+            new_venue = d["room_obj"]
+            expected_students = d["expected_students"]
+        else:
+            if not title or not message:
+                return Response({"detail": "Title and message are required."}, status=400)
+            if not unit_id:
+                return Response({"detail": "unit_id is required."}, status=400)
         # Get current term
         from apps.timetable.models import AcademicTerm
         term = AcademicTerm.objects.filter(is_current=True).first()
@@ -250,8 +259,10 @@ class LecturerSendNotificationView(APIView):
             title=title,
             message=message,
             notification_type=notification_type,
-            target=Notification.Target.ALL,
+            target=Target.ALL,
             recipients_count=len(users),
+            new_venue=new_venue,
+            expected_students=expected_students,
         )
 
         StudentNotification.objects.bulk_create([
@@ -283,3 +294,20 @@ class UnregisterFCMTokenView(APIView):
             return Response({"detail": "token is required."}, status=400)
         FCMToken.objects.filter(user=request.user, token=token).delete()
         return Response({"detail": "Token removed."})
+class ValidateVenueCapacityView(APIView):
+    """
+    POST /api/v1/notifications/lecturer/validate-venue/
+    Body: { "new_venue_id": "<uuid>", "expected_students": 100 }
+    Used by the app to check fit BEFORE the lecturer hits send.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        s = LecturerVenueChangeSerializer(data={
+            "title": "x", "message": "x", "unit_id": "x",
+            "new_venue_id": request.data.get("new_venue_id"),
+            "expected_students": request.data.get("expected_students"),
+        })
+        if s.is_valid():
+            return Response({"ok": True})
+        return Response(s.errors, status=400)

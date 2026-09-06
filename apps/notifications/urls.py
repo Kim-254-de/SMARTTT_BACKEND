@@ -3,7 +3,7 @@ from .views import (
     MarkNotificationReadView, MyNotificationsView,
     NotificationListView, RegisterFCMTokenView,
     SendNotificationView, UnreadCountView,
-    LecturerSendNotificationView,
+    LecturerSendNotificationView, ValidateVenueCapacityView,
     UnregisterFCMTokenView, 
 )
 
@@ -15,5 +15,6 @@ urlpatterns = [
     path("unread-count/", UnreadCountView.as_view(), name="unread-count"),
     path("<uuid:pk>/read/", MarkNotificationReadView.as_view(), name="mark-read"),
     path("lecturer/send/", LecturerSendNotificationView.as_view(), name="lecturer-send"),
+    path("lecturer/validate-venue/", ValidateVenueCapacityView.as_view(), name="lecturer-validate-venue"),
     path("unregister-token/", UnregisterFCMTokenView.as_view(), name="unregister-token"),
 ]

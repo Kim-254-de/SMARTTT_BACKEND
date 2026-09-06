@@ -13,7 +13,9 @@ from apps.notifications.models import (
     ClassReminderDelivery,
     FCMToken,
     Notification,
+    NotificationType,
     StudentNotification,
+    Target,
 )
 from apps.timetable.models import AcademicTerm, TimetableSlot
 
@@ -95,8 +97,8 @@ class Command(BaseCommand):
             sent_by=None,
             title=f"Class in {minutes_before} minutes",
             message=f"{unit_label} starts at {occurrence:%H:%M}{room_label}.",
-            notification_type=Notification.Type.CLASS_REMINDER,
-            target=Notification.Target.ALL,
+            notification_type=NotificationType.CLASS_REMINDER,
+            target=Target.ALL,
             recipients_count=1,
         )
         StudentNotification.objects.create(user=user, notification=notification)
