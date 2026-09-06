@@ -3,10 +3,11 @@ timetable/services/pdf_timetable_parser.py
 
 Parser for Tharaka University Master Teaching Timetable.
 Handles:
+  - Unit code normalisation (normalise_unit_code)
   - Disentangling stacked units and venues per cell
-  - Parsing unit groups (e.g. MATH 124 GR.M, PHYS 121 GRA, EDCI 104 GRJ)
+  - Parsing unit groups (e.g., MATH 124 GR.M, PHYS 121 GRA, EDCI 104 GRJ)
   - Pairing separate venues to separate units
-  - Accurate day-of-week parsing (mon, tue, wed, thu, fri)
+  - Lowercase day-of-week codes (mon, tue, wed, thu, fri)
 """
 
 from __future__ import annotations
@@ -86,26 +87,34 @@ def _clean(text: str | None) -> str:
     return re.sub(r"[ \t]+", " ", str(text)).strip()
 
 
+def normalise_unit_code(raw_unit: str) -> str:
+    """
+    Exported helper expected across the upload pipeline.
+    Strips non-alphanumeric characters and group noise.
+    """
+    if not raw_unit:
+        return ""
+    cleaned = re.sub(GROUP_RE, "", raw_unit)
+    return re.sub(r"[^A-Z0-9]", "", cleaned.upper())
+
+
 def parse_unit_and_group(text: str) -> tuple[str, str]:
     """
     Extracts the normalized unit code and specific group from text.
     Example:
-      "MATH 124 GR.M" -> ("MATH124", "GR_M")
-      "PHYS 121 GRA"   -> ("PHYS121", "GR_A")
-      "COSC 103"       -> ("COSC103", "MAIN")
+      'MATH 124 GR.M' -> ('MATH124', 'GR_M')
+      'PHYS 121 GRA'   -> ('PHYS121', 'GR_A')
+      'COSC 103'       -> ('COSC103', 'MAIN')
     """
     cleaned = text.strip()
     group = "MAIN"
 
-    # Search for group match
     m = GROUP_RE.search(cleaned)
     if m:
         extracted = (m.group(1) or m.group(2) or "").upper()
         group = f"GR_{extracted}"
-        # Remove group text from unit code string
         cleaned = cleaned[:m.start()] + cleaned[m.end():]
 
-    # Clean the unit code (keep alphanumeric characters only)
     unit_code = re.sub(r"[^A-Z0-9]", "", cleaned.upper())
     return unit_code, group
 
@@ -185,7 +194,7 @@ def parse_pdf(path: str) -> ParseResult:
                         r += 1
                         continue
 
-                    # Look ahead to see if the row immediately below holds venues
+                    # Look ahead for venue row
                     venue_row = None
                     if r + 1 < num_rows:
                         next_row = data[r + 1]
@@ -199,11 +208,9 @@ def parse_pdf(path: str) -> ParseResult:
                         if not cell_raw:
                             continue
 
-                        # Extract unit candidate lines and venue candidate lines
                         unit_lines = _split_cell_lines(cell_raw)
                         v_lines = _split_cell_lines(venue_row[c]) if (venue_row and c < len(venue_row)) else []
 
-                        # If cell itself has unit + venue embedded across lines:
                         if not v_lines and len(unit_lines) >= 2:
                             if _is_likely_venue(unit_lines[-1]):
                                 v_lines = [unit_lines.pop()]
@@ -211,21 +218,18 @@ def parse_pdf(path: str) -> ParseResult:
                         day_str = current_day_map.get(c, "Monday")
                         st_time, end_time = _approx_time_for_col(c)
 
-                        # Pair each unit with its corresponding venue and cohort
                         max_items = max(len(unit_lines), 1)
                         for i in range(max_items):
                             u_text = unit_lines[i] if i < len(unit_lines) else (unit_lines[0] if unit_lines else "")
                             if not u_text or _is_likely_venue(u_text):
                                 continue
 
-                            # Resolve venue for this item
                             venue_item = "TBA"
                             if i < len(v_lines):
                                 venue_item = v_lines[i]
                             elif v_lines:
                                 venue_item = v_lines[-1]
 
-                            # Resolve cohort
                             cohort_item = cohort_lines[i] if i < len(cohort_lines) else cohort_lines[0]
 
                             clean_unit, group = parse_unit_and_group(u_text)
@@ -247,7 +251,6 @@ def parse_pdf(path: str) -> ParseResult:
                                 )
                             )
 
-                    # Advance by 2 if venue_row was consumed, else 1
                     if venue_row is not None:
                         r += 2
                     else:
