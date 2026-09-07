@@ -4,6 +4,7 @@ from apps.units.views import UnitViewSet
 from apps.timetable.views.timetable_viewsets import (
     AcademicTermViewSet,
     TimetableUploadAPIView,
+    TimetableUploadStatusAPIView,
     TimetableUploadListViewSet,
 )
 from apps.timetable.views.viewsets import RoomViewSet, TimeSlotViewSet, TimetableSessionViewSet
@@ -19,6 +20,7 @@ router.register("sessions", TimetableSessionViewSet, basename="session")
 urlpatterns = [
     path("", include(router.urls)),
     path("upload/", TimetableUploadAPIView.as_view(), name="timetable-upload"),
+    path("upload/<uuid:batch_id>/status/", TimetableUploadStatusAPIView.as_view(), name="timetable-upload-status"),
     path("upload/list/", TimetableUploadListViewSet.as_view({"get": "list"}), name="timetable-upload-list"),
     path("assign-lecturers/", AssignLecturersAPIView.as_view(), name="timetable-assign-lecturers"),
 ]
