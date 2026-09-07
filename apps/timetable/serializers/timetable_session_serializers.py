@@ -48,8 +48,11 @@ class TimetableSessionListSerializer(serializers.ModelSerializer):
         ]
 
     def get_lecturer_name(self, obj) -> str:
-        """Get lecturer full name."""
-        return obj.lecturer.user.get_full_name() if obj.lecturer else None
+        if obj.lecturer and hasattr(obj.lecturer, "user") and obj.lecturer.user:
+            name = obj.lecturer.user.get_full_name().strip()
+            if name:
+                return name
+        return getattr(obj, "lecturer_name_text", "") or ""
 
     def get_time_range(self, obj) -> str:
         """Get formatted time range."""

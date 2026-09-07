@@ -85,23 +85,13 @@ class TimetableUploadBatchSerializer(serializers.ModelSerializer):
 
 
 class TimetableSlotDetailedSerializer(serializers.ModelSerializer):
-   
     term_display = serializers.CharField(source="term.__str__", read_only=True)
-    unit_display = serializers.CharField(
-        source="unit.__str__",
-        read_only=True
-    )
-    program_display = serializers.CharField(
-        source="program.__str__",
-        read_only=True
-    )
-    lecturer_display = serializers.CharField(
-        source="lecturer.user.get_full_name",
-        read_only=True
-    )
+    unit_display = serializers.CharField(source="unit.__str__", read_only=True)
+    program_display = serializers.CharField(source="program.__str__", read_only=True)
+    lecturer_display = serializers.SerializerMethodField()
     room_display = serializers.CharField(source="room.code", read_only=True)
     day_display = serializers.CharField(source="get_day_of_week_display", read_only=True)
-    
+
     class Meta:
         model = TimetableSlot
         fields = (
@@ -128,24 +118,25 @@ class TimetableSlotDetailedSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id", "created_at", "updated_at")
 
+    def get_lecturer_display(self, obj) -> str:
+        if obj.lecturer and hasattr(obj.lecturer, "user") and obj.lecturer.user:
+            name = obj.lecturer.user.get_full_name().strip()
+            if name:
+                return name
+        return getattr(obj, "lecturer_name_text", "") or ""
+
 
 class TimetableSlotSerializer(serializers.ModelSerializer):
     """Standard serializer for TimetableSlot model."""
 
-    subject = serializers.CharField(source="curriculum_unit.unit.name", read_only=True)
-    instructor = serializers.CharField(source="lecturer.user.get_full_name", read_only=True)
+    subject = serializers.CharField(source="unit.name", read_only=True)
+    instructor = serializers.SerializerMethodField()
     location = serializers.CharField(source="room.code", read_only=True)
 
-    curriculum_unit_display = serializers.CharField(
-        source="curriculum_unit.__str__",
-        read_only=True,
-    )
-    lecturer_display = serializers.CharField(
-        source="lecturer.user.get_full_name",
-        read_only=True,
-    )
+    curriculum_unit_display = serializers.CharField(source="unit.__str__", read_only=True)
+    lecturer_display = serializers.SerializerMethodField()
     room_display = serializers.CharField(source="room.code", read_only=True)
-    
+
     class Meta:
         model = TimetableSlot
         fields = (
@@ -164,13 +155,22 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
             "class_group",
             "upload_batch",
             "created_at",
-
             # Frontend-friendly aliases
             "subject",
             "instructor",
             "location",
         )
         read_only_fields = ("id", "created_at")
+
+    def get_instructor(self, obj) -> str:
+        if obj.lecturer and hasattr(obj.lecturer, "user") and obj.lecturer.user:
+            name = obj.lecturer.user.get_full_name().strip()
+            if name:
+                return name
+        return getattr(obj, "lecturer_name_text", "") or ""
+
+    def get_lecturer_display(self, obj) -> str:
+        return self.get_instructor(obj)
 
 
 class ConflictDetailSerializer(serializers.ModelSerializer):

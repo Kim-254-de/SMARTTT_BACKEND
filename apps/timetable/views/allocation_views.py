@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.lecturers.models import Lecturer
+from apps.personalization.services.personalization_cache_service import PersonalizationCacheService
 from apps.timetable.models import AcademicTerm, TimetableSlot
 from apps.timetable.permissions import CanManageTimetable
 from apps.timetable.services.allocation_parser import (
@@ -173,6 +174,12 @@ class AssignLecturersAPIView(APIView):
             })
 
         slots_updated_total = sum(r["slots_updated"] for r in results)
+
+        # Clear student cache so all updated slots immediately reflect
+        try:
+            PersonalizationCacheService.clear_all()
+        except Exception:
+            pass
 
         return Response({
             "detail": f"Processed {len(allocation_rows)} allocation row(s).",
