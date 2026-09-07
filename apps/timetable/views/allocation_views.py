@@ -36,11 +36,9 @@ def _match_lecturer(lecturer_name: str) -> Lecturer | None:
         full_name = _clean_name(lecturer.user.get_full_name())
         if not full_name:
             continue
-        # Direct equality or token-set match
         if target == full_name or target in full_name or full_name in target:
             return lecturer
 
-        # Word-boundary check (e.g. 'Luke Mwema' matching 'Mwema Luke')
         target_tokens = set(target.split())
         lecturer_tokens = set(full_name.split())
         if target_tokens and target_tokens.issubset(lecturer_tokens):
@@ -114,7 +112,7 @@ class AssignLecturersAPIView(APIView):
             lecturer_name = row.get("lecturer_name", "").strip()
             group_hint = row.get("group", "")
 
-            # Generate normalization variants (e.g., 'COSC 104', 'COSC104', 'COSC 00104')
+            # Generate normalization variants (e.g. 'COSC 104', 'COSC104', 'COSC 00104')
             compact_code = re.sub(r"[^A-Z0-9]", "", unit_code.upper())
             prefix_match = re.match(r"^([A-Z]+)(\d+)$", compact_code)
 
@@ -122,9 +120,8 @@ class AssignLecturersAPIView(APIView):
 
             if prefix_match:
                 dept_code, digits = prefix_match.groups()
-                # Also match zero-padded variants like COSC 00104 matching COSC104 or COSC00104
                 stripped_digits = digits.lstrip("0") or "0"
-                query |= Q(unit__code__icontains=dept_code, unit__code__icontains=stripped_digits)
+                query |= (Q(unit__code__icontains=dept_code) & Q(unit__code__icontains=stripped_digits))
 
             matched_slots_qs = slot_qs.filter(query)
 
@@ -154,12 +151,10 @@ class AssignLecturersAPIView(APIView):
             for slot in slots:
                 fields_to_update = []
 
-                # Assign foreign key profile if account exists
                 if lecturer and slot.lecturer_id != lecturer.id:
                     slot.lecturer = lecturer
                     fields_to_update.append("lecturer")
 
-                # Always update display text name so students see the lecturer
                 if hasattr(slot, "lecturer_name_text"):
                     clean_display = re.sub(r"\(.*?\)", "", lecturer_name).strip()
                     if slot.lecturer_name_text != clean_display:
