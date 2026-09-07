@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.core.models import Room
+from apps.rooms.models import Room
 from .models import FCMToken, Notification, NotificationType, StudentNotification, Target
 
 
