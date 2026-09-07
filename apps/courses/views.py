@@ -34,7 +34,7 @@ class PortalSyncView(APIView):
             return Response(
                 {"detail": "No registered units found on the portal. "
                            "Make sure you have registered units for this semester."},
-                status=status.HTTP_200_OK,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
         try:
