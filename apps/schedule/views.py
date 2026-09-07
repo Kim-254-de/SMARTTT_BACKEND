@@ -1,4 +1,4 @@
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -6,11 +6,21 @@ from .services import generate_for_user
 from datetime import datetime, timedelta
 
 import pytz
+from django.contrib.auth import get_user_model
+from django.core import signing
 from django.http import HttpResponse
+from django.urls import reverse
 from icalendar import Alarm, Calendar, Event
 
 from apps.courses.models import StudentUnit
 from apps.timetable.models import AcademicTerm, TimetableSlot
+
+# Salt for signing calendar feed tokens (not a secret on its own —
+# the actual signing key is Django's SECRET_KEY)
+CALENDAR_TOKEN_SALT = "smarttt-calendar-feed"
+
+# 5 years — effectively "doesn't expire" for a subscribed feed
+CALENDAR_TOKEN_MAX_AGE = 60 * 60 * 24 * 365 * 5
 
 class MyScheduleView(APIView):
     """
@@ -24,11 +34,50 @@ class MyScheduleView(APIView):
         return Response(payload)
 
 #iCalendar feed view for the authenticated user
-class MyCalendarFeedView(APIView):
+class CalendarTokenView(APIView):
+    """
+    GET /api/v1/schedule/calendar-token/
+    Returns a long-lived signed token the authenticated user embeds in
+    their calendar.ics subscription URL. Calendar apps (Google/Apple/
+    Outlook) poll .ics URLs without sending Authorization headers, so
+    the feed itself can't require normal JWT auth.
+    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user
+        token = signing.dumps(
+            {'user_id': request.user.id}, salt=CALENDAR_TOKEN_SALT
+        )
+        feed_path = reverse('my-calendar-feed')
+        feed_url = request.build_absolute_uri(f'{feed_path}?token={token}')
+        return Response({'token': token, 'feed_url': feed_url})
+
+
+#iCalendar feed view — token-authenticated for calendar-app subscriptions
+class MyCalendarFeedView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []  # token is in the query string, not a header
+
+    def get(self, request):
+        token = request.query_params.get('token')
+        if not token:
+            return HttpResponse('Missing token', status=401)
+
+        try:
+            data = signing.loads(
+                token,
+                salt=CALENDAR_TOKEN_SALT,
+                max_age=CALENDAR_TOKEN_MAX_AGE,
+            )
+        except signing.BadSignature:
+            return HttpResponse('Invalid or expired token', status=401)
+
+        User = get_user_model()
+        try:
+            user = User.objects.get(pk=data['user_id'])
+        except User.DoesNotExist:
+            return HttpResponse('Invalid token', status=401)
+
         tz = pytz.timezone('Africa/Nairobi')
 
         term = AcademicTerm.objects.filter(is_current=True).first()

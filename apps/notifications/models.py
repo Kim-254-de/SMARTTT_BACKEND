@@ -31,23 +31,26 @@ class FCMToken(models.Model):
         return f"{self.user.email} [{self.platform}]"
 
 
+class Target(models.TextChoices):
+    ALL = "all", "All Students"
+    PROGRAM = "program", "Specific Program"
+    YEAR = "year", "Specific Year of Study"
+
+
+class NotificationType(models.TextChoices):
+    TIMETABLE_CHANGE = "timetable_change", "Timetable Change"
+    VENUE_CHANGE = "venue_change", "Venue Change"
+    CLASS_REMINDER = "class_reminder", "Class Reminder"
+    SYNC_REMINDER = "sync_reminder", "Sync Reminder"
+    REGISTRATION_REMINDER = "registration_reminder", "Registration Reminder"
+    GENERAL = "general", "General"
+
+
 class Notification(models.Model):
     """
     A notification sent by admin to students.
     Stored in DB so students can see notification history in the Alerts screen.
     """
-    class Target(models.TextChoices):
-        ALL = "all", "All Students"
-        PROGRAM = "program", "Specific Program"
-        YEAR = "year", "Specific Year of Study"
-
-    class Type(models.TextChoices):
-        TIMETABLE_CHANGE = "timetable_change", "Timetable Change"
-        CLASS_REMINDER = "class_reminder", "Class Reminder"
-        SYNC_REMINDER = "sync_reminder", "Sync Reminder"
-        REGISTRATION_REMINDER = "registration_reminder", "Registration Reminder"
-        GENERAL = "general", "General"
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     sent_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -59,7 +62,9 @@ class Notification(models.Model):
     title = models.CharField(max_length=255)
     message = models.TextField()
     notification_type = models.CharField(
-        max_length=30, choices=Type.choices, default=Type.GENERAL
+        max_length=30,
+        choices=NotificationType.choices,
+        default=NotificationType.GENERAL,
     )
     target = models.CharField(max_length=20, choices=Target.choices, default=Target.ALL)
     target_program = models.ForeignKey(
@@ -68,6 +73,10 @@ class Notification(models.Model):
     )
     target_year = models.PositiveSmallIntegerField(null=True, blank=True)
     recipients_count = models.PositiveIntegerField(default=0)
+    new_venue = models.ForeignKey(
+        "core.Room", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    expected_students = models.PositiveIntegerField(null=True, blank=True)
     sent_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
