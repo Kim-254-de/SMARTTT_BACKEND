@@ -24,3 +24,5 @@ staticfiles/
 .system_generated/
 render.yaml
 render_start.sh
+actions-runner/
+*.tar.gz

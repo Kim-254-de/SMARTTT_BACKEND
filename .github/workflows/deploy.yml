@@ -10,21 +10,10 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Deploy and restart services
+      - name: Deploy via Docker Compose
         run: |
-          # Navigate to project location on the VPS
-          cd $GITHUB_WORKSPACE
+          cd /var/www/smarttt/SMARTTT_BACKEND
+          git pull origin main
+          docker compose -f docker-compose.prod.yml up -d --build
+          docker image prune -f
 
-          # Activate virtualenv and update dependencies
-          source .venv/bin/activate
-          pip install -r requirements.txt
-
-          # Database migrations & static collection
-          python manage.py migrate
-          python manage.py collectstatic --noinput
-
-          # Restart Gunicorn service
-          sudo systemctl restart gunicorn
