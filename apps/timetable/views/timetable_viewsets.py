@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import uuid
 from django.conf import settings
@@ -30,8 +32,95 @@ from apps.timetable.validators import ExcelFileValidator
 from apps.timetable.utils import TimetableResponseFormatter
 
 
-# Keep StandardResultsSetPagination, AcademicTermViewSet, TimetableSlotViewSet, 
-# TimetableConflictViewSet, and TimetableUploadListViewSet as they are...
+class StandardResultsSetPagination(PageNumberPagination):
+    """Standard pagination for list endpoints."""
+    page_size = 50
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class AcademicTermViewSet(ModelViewSet):
+    queryset = AcademicTerm.objects.all()
+    serializer_class = AcademicTermSerializer
+    permission_classes = [CanManageTimetable]
+    filterset_fields = ["academic_year", "semester", "is_current"]
+    ordering_fields = ["-academic_year", "-semester", "is_current"]
+    ordering = ["-academic_year", "-semester"]
+    pagination_class = StandardResultsSetPagination
+
+
+class TimetableSlotViewSet(ModelViewSet):
+    permission_classes = [CanManageTimetable]
+    filterset_fields = ["term", "day_of_week", "room", "lecturer", "upload_batch"]
+    ordering_fields = ["term", "_day_sort", "start_time", "end_time"]
+    ordering = ["term", "_day_sort", "start_time"]
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        from apps.timetable.utils.day_order import day_of_week_sort_case
+        return TimetableSlot.objects.select_related(
+            "term",
+            "unit",
+            "program",
+            "lecturer",
+            "lecturer__user",
+            "room",
+            "upload_batch",
+            "upload_batch__uploaded_by"
+        ).annotate(_day_sort=day_of_week_sort_case()).order_by("term", "_day_sort", "start_time")
+
+    def get_serializer_class(self):
+        if self.action == "detailed":
+            return TimetableSlotDetailedSerializer
+        return TimetableSlotSerializer
+
+    @action(detail=True, methods=["get"])
+    def detailed(self, request, pk=None):
+        slot = self.get_object()
+        serializer = TimetableSlotDetailedSerializer(slot)
+        return Response(serializer.data)
+
+
+class TimetableConflictViewSet(ReadOnlyModelViewSet):
+    permission_classes = [CanManageTimetable]
+    filterset_fields = ["term", "conflict_type", "slot_a", "slot_b"]
+    ordering_fields = ["created_at", "conflict_type"]
+    ordering = ["-created_at"]
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        return TimetableConflict.objects.select_related(
+            "term",
+            "slot_a",
+            "slot_a__unit",
+            "slot_a__room",
+            "slot_a__lecturer",
+            "slot_b",
+            "slot_b__unit",
+            "slot_b__room",
+            "slot_b__lecturer"
+        ).all()
+
+    def get_serializer_class(self):
+        return ConflictDetailSerializer
+
+
+class TimetableUploadListViewSet(ReadOnlyModelViewSet):
+    permission_classes = [CanManageTimetable]
+    filterset_fields = ["status", "uploaded_by"]
+    ordering_fields = ["created_at", "status", "rows_saved"]
+    ordering = ["-created_at"]
+    pagination_class = StandardResultsSetPagination
+
+    def get_queryset(self):
+        return TimetableUploadBatch.objects.select_related(
+            "uploaded_by"
+        ).all()
+
+    def get_serializer_class(self):
+        if self.action == "retrieve":
+            return TimetableUploadBatchDetailedSerializer
+        return TimetableUploadBatchSerializer
 
 
 class TimetableUploadAPIView(APIView):
@@ -55,7 +144,7 @@ class TimetableUploadAPIView(APIView):
 
         file_obj = request.FILES["file"]
 
-        # Validate file size & extension (PDFs/Excels)
+        # Validate file size & extension
         try:
             ExcelFileValidator.validate_file_extension(file_obj.name)
             ExcelFileValidator.validate_file_size(file_obj.size)
@@ -69,7 +158,7 @@ class TimetableUploadAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Save the file to disk for background thread access
+        # Save temporary file on server disk
         temp_dir = os.path.join(settings.BASE_DIR, "tmp_uploads")
         os.makedirs(temp_dir, exist_ok=True)
         unique_file_name = f"{uuid.uuid4()}_{file_obj.name}"
@@ -99,7 +188,6 @@ class TimetableUploadAPIView(APIView):
         # Spawn daemon worker thread
         dispatch_async_upload(upload_batch, saved_file_path, academic_year=academic_year)
 
-        # Return 202 Accepted within <500ms to avoid 504 timeouts
         return Response(
             {
                 "status": "processing",
