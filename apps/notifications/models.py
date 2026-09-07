@@ -74,7 +74,7 @@ class Notification(models.Model):
     target_year = models.PositiveSmallIntegerField(null=True, blank=True)
     recipients_count = models.PositiveIntegerField(default=0)
     new_venue = models.ForeignKey(
-        "core.Room", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+        "rooms.Room", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
     expected_students = models.PositiveIntegerField(null=True, blank=True)
     sent_at = models.DateTimeField(auto_now_add=True)
