@@ -6,6 +6,7 @@ from .password_reset_request_serializer import PasswordResetRequestSerializer
 from .user_profile_serializer import UserProfileSerializer
 from .user_registration_serializer import UserRegistrationSerializer
 from .user_serializer import UserSerializer
+from .language_serializer import LanguageUpdateSerializer
 
 __all__ = [
     "AccountActivationRequestSerializer",
@@ -16,4 +17,5 @@ __all__ = [
     "PasswordResetRequestSerializer",
     "PasswordResetConfirmSerializer",
     "UserRegistrationSerializer",
+    "LanguageUpdateSerializer",
 ]

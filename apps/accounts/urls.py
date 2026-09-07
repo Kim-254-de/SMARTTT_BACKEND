@@ -14,6 +14,7 @@ from .views.auth_views import (
     StaffIDListView,
     StaffIDUploadView,
 )
+from .views.language_views import UpdateLanguageAPIView
 
 urlpatterns = [
     path("register/", RegisterView.as_view(), name="register"),
@@ -29,4 +30,5 @@ urlpatterns = [
     path("lecturer/students/", LecturerStudentsView.as_view(), name="lecturer-students"),
     path("staff-ids/upload/", StaffIDUploadView.as_view(), name="staff-id-upload"),
     path("staff-ids/", StaffIDListView.as_view(), name="staff-id-list"),
+    path("language/", UpdateLanguageAPIView.as_view(), name="change-language"),
 ]
