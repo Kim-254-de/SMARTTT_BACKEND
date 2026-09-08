@@ -583,6 +583,7 @@ class LecturerProfileView(APIView):
         from apps.timetable.models import AcademicTerm, TimetableSlot
         from apps.timetable.serializers import TimetableSlotSerializer
         from apps.lecturers.models import Lecturer
+        from django.db.models import Q
 
         user = request.user
         if user.role not in ["lecturer"]:
@@ -593,30 +594,43 @@ class LecturerProfileView(APIView):
         slot_source = "none"
 
         if term:
-            try:
-                lecturer_profile = Lecturer.objects.get(user=user)
-                assigned_slots = TimetableSlot.objects.select_related("unit", "program", "room", "term").filter(term=term, lecturer=lecturer_profile)
+            # First clean the logged-in lecturer's name to match allocation formatting
+            clean_user_name = user.get_full_name().strip()
+            # Try to get the FK profile
+            lecturer_profile = Lecturer.objects.filter(user=user).first()
+            
+            # Match slots strictly by FK OR loosely by exact name in lecturer_name_text
+            query = Q()
+            if lecturer_profile:
+                query |= Q(lecturer=lecturer_profile)
+            if clean_user_name:
+                query |= Q(lecturer_name_text__icontains=clean_user_name)
+
+            if query:
+                assigned_slots = TimetableSlot.objects.select_related(
+                    "unit", "program", "room", "term"
+                ).filter(Q(term=term) & query)
+                
                 if assigned_slots.exists():
                     slots = TimetableSlotSerializer(assigned_slots, many=True).data
                     slot_source = "assigned"
-            except Lecturer.DoesNotExist:
-                pass
 
-            if not slots:
-                all_slots = TimetableSlot.objects.select_related("unit", "program", "room", "term").filter(term=term).order_by("day", "start_time")
-                slots = TimetableSlotSerializer(all_slots, many=True).data
-                slot_source = "all_units"
-
-        return Response({"user": UserSerializer(user).data, "current_term": str(term) if term else None, "slots": slots, "slot_source": slot_source})
+        return Response({
+            "user": UserSerializer(user).data, 
+            "current_term": str(term) if term else None, 
+            "slots": slots, 
+            "slot_source": slot_source
+        })
 
 
 class LecturerStudentsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        from apps.timetable.models import AcademicTerm
+        from apps.timetable.models import AcademicTerm, TimetableSlot
         from apps.courses.models import StudentUnit
         from apps.lecturers.models import Lecturer
+        from django.db.models import Q
 
         user = request.user
         if user.role not in ["lecturer"]:
@@ -630,14 +644,41 @@ class LecturerStudentsView(APIView):
         if not term:
             return Response({"detail": "No current term."}, status=400)
 
-        try:
-            lecturer_profile = Lecturer.objects.get(user=user)
-            is_assigned = TimetableSlot.objects.filter(term=term, unit_id=unit_id, lecturer=lecturer_profile).exists()
-        except Lecturer.DoesNotExist:
-            is_assigned = False
+        clean_user_name = user.get_full_name().strip()
+        lecturer_profile = Lecturer.objects.filter(user=user).first()
 
-        students = StudentUnit.objects.select_related("user", "unit").filter(unit_id=unit_id, term=term)
-        return Response({"detail": "ok", "is_assigned": is_assigned, "students": []})
+        query = Q()
+        if lecturer_profile:
+            query |= Q(lecturer=lecturer_profile)
+        if clean_user_name:
+            query |= Q(lecturer_name_text__icontains=clean_user_name)
+
+        is_assigned = False
+        if query:
+            is_assigned = TimetableSlot.objects.filter(
+                Q(term=term, unit_id=unit_id) & query
+            ).exists()
+
+        students_qs = StudentUnit.objects.select_related("student", "student__user").filter(
+            unit_id=unit_id, term=term
+        )
+        
+        # Serialize students properly for the dashboard frontend
+        students_data = [
+            {
+                "id": su.student.id,
+                "name": su.student.user.get_full_name(),
+                "university_id": su.student.registration_number,
+                "email": su.student.user.email,
+            }
+            for su in students_qs if hasattr(su, 'student') and su.student
+        ]
+
+        return Response({
+            "detail": "ok", 
+            "is_assigned": is_assigned, 
+            "students": students_data
+        })
 
 class PasswordResetView(APIView):
     permission_classes = [AllowAny]
