@@ -36,7 +36,9 @@ HEADERS = {
 
 
 class ScraperError(Exception):
-    pass
+    def __init__(self, message: str, *, code: str = "scraper_error"):
+        super().__init__(message)
+        self.code = code
 
 
 def _get_aspnet_tokens(html: str) -> dict:
@@ -71,7 +73,9 @@ def scrape_student_units(portal_username: str, portal_password: str) -> list[dic
         resp = session.get(PORTAL_URL, timeout=15)
         resp.raise_for_status()
     except requests.RequestException as exc:
-        raise ScraperError(f"Could not reach student portal: {exc}") from exc
+        raise ScraperError(
+            "Could not reach student portal.", code="portal_unavailable"
+        ) from exc
 
     tokens = _get_aspnet_tokens(resp.text)
 
@@ -93,13 +97,13 @@ def scrape_student_units(portal_username: str, portal_password: str) -> list[dic
         )
         resp.raise_for_status()
     except requests.RequestException as exc:
-        raise ScraperError(f"Login request failed: {exc}") from exc
+        raise ScraperError("Login request failed.", code="portal_unavailable") from exc
 
     if "Warning!, login failed" in resp.text:
-        raise ScraperError("Invalid portal credentials. Please check your admission number and password.")
+        raise ScraperError("Portal credentials were rejected.", code="invalid_credentials")
 
     if "Dashboard" not in resp.url and "dashboard" not in resp.text.lower():
-        raise ScraperError("Login appeared to succeed but did not reach the dashboard.")
+        raise ScraperError("Portal credentials were rejected.", code="invalid_credentials")
 
     # ── Step 3: GET the registered units page ─────────────────────────────────
     time.sleep(1)
@@ -107,10 +111,12 @@ def scrape_student_units(portal_username: str, portal_password: str) -> list[dic
         resp = session.get(UNITS_URL, timeout=15)
         resp.raise_for_status()
     except requests.RequestException as exc:
-        raise ScraperError(f"Could not load units page: {exc}") from exc
+        raise ScraperError(
+            "Could not load units page.", code="portal_unavailable"
+        ) from exc
 
     if "login" in resp.url.lower():
-        raise ScraperError("Session expired before reaching the units page.")
+        raise ScraperError("Portal credentials were rejected.", code="invalid_credentials")
 
     # ── Step 4: Parse the REGISTERED UNITS table ──────────────────────────────
     soup = BeautifulSoup(resp.text, "html.parser")
