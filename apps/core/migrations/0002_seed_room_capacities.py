@@ -14,14 +14,21 @@ ROOM_CAPACITIES = [
     ("UTC 13", 280), ("UTC 14", 280),
 ]
 
+# GZ block: GZ 1 through GZ 80, capacity 12 each
+ROOM_CAPACITIES += [(f"GZ {i}", 12) for i in range(1, 81)]
+
+
 def seed_rooms(apps, schema_editor):
-    Room = apps.get_model("core", "Room")
+    Room = apps.get_model("rooms", "Room")
     for code, capacity in ROOM_CAPACITIES:
-        Room.objects.update_or_create(code=code, defaults={"capacity": capacity})
+        Room.objects.update_or_create(
+            code=code,
+            defaults={"capacity": capacity, "name": code, "building": code.split()[0]},
+        )
 
 def reverse(apps, schema_editor):
     pass
 
 class Migration(migrations.Migration):
-    dependencies = [("core", "0001_initial")]  # confirm this matches your last core migration
+    dependencies = [("rooms", "0001_initial")]
     operations = [migrations.RunPython(seed_rooms, reverse)]
