@@ -45,6 +45,7 @@ def serialize_user(user):
         "id": user.id,
         "email": user.email,
         "full_name": user.get_full_name(),
+        "role": user.role,  # <--- Added role so lecturer.html passes validation
         "admission_number": user.university_id,
         "course": getattr(program, 'name', None),
         "department": getattr(department, 'name', None),
@@ -168,11 +169,13 @@ class LoginView(APIView):
         password = request.data.get('password')
 
         if not login_id or not password:
-            return Response({"detail": "Username/email and password are required."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Username/email/staff ID and password are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Look up user by email or username first
+        # Look up user by email, username, OR university_id (staff ID / phone number)
         user_obj = User.objects.filter(
-            Q(email__iexact=login_id) | Q(username__iexact=login_id)
+            Q(email__iexact=login_id) | 
+            Q(username__iexact=login_id) | 
+            Q(university_id__iexact=login_id)
         ).first()
 
         user = None
