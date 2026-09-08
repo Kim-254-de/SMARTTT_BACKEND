@@ -21,9 +21,12 @@ VALID_ALLOCATION_EXTENSIONS = {".docx", ".pdf"}
 
 
 def _clean_name(name: str) -> str:
-    """Removes titles, tags like (FT)/(PT), and collapses whitespace."""
+    """Removes titles, employment tags like (FT)/(PT), and collapses whitespace."""
     cleaned = re.sub(r"\(.*?\)", "", name)
     cleaned = re.sub(r"\b(dr|prof|mr|mrs|ms)\b\.?", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"07\d{8}|01\d{8}|\+254\d+", "", cleaned)
+    if "/" in cleaned:
+        cleaned = cleaned.split("/")[0]
     return " ".join(cleaned.split()).strip().lower()
 
 
@@ -98,7 +101,7 @@ class AssignLecturersAPIView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # Fall back to all slots if current term is unset or contains 0 records
+        # Restrict to active term slots if available, otherwise search all slots
         current_term = AcademicTerm.objects.filter(is_current=True).first()
         slot_qs = TimetableSlot.objects.all()
         if current_term and slot_qs.filter(term=current_term).exists():
@@ -111,9 +114,12 @@ class AssignLecturersAPIView(APIView):
             unit_code = row.get("unit_code", "").strip()
             raw_code = row.get("raw_unit_code", unit_code).strip()
             lecturer_name = row.get("lecturer_name", "").strip()
-            group_hint = row.get("group", "")
+            group_hint = row.get("group", "").strip()
 
-            # Generate normalization variants (e.g. 'COSC 104', 'COSC104', 'COSC 00104')
+            if not lecturer_name or "co-ordination" in lecturer_name.lower():
+                continue
+
+            # Generate normalization variations: COSC 104, COSC104, COSC 00104
             compact_code = re.sub(r"[^A-Z0-9]", "", unit_code.upper())
             prefix_match = re.match(r"^([A-Z]+)(\d+)$", compact_code)
 
@@ -126,13 +132,15 @@ class AssignLecturersAPIView(APIView):
 
             matched_slots_qs = slot_qs.filter(query)
 
-            # If the row specifies a specific group (e.g. Group A / GRP K), narrow matches
+            # Apply group filtering if specific group target is present (e.g. Group A / GRP K)
             if group_hint:
-                clean_group = group_hint.replace("GROUP", "").replace("GRP", "").strip()
+                clean_group = re.sub(r"^(GROUP|GRP)\s*", "", group_hint, flags=re.IGNORECASE).strip()
                 group_filtered = matched_slots_qs.filter(
                     Q(class_group__iexact=clean_group) |
                     Q(class_group__iexact=f"GR_{clean_group}") |
-                    Q(class_group__iexact=f"GR {clean_group}")
+                    Q(class_group__iexact=f"GR {clean_group}") |
+                    Q(class_group__iexact=f"Group {clean_group}") |
+                    Q(class_group__icontains=f"Group {clean_group}")
                 )
                 if group_filtered.exists():
                     matched_slots_qs = group_filtered
@@ -147,9 +155,15 @@ class AssignLecturersAPIView(APIView):
                 continue
 
             lecturer = _match_lecturer(lecturer_name)
+            clean_display = re.sub(r"\(.*?\)", "", lecturer_name).strip()
             updated = 0
 
             for slot in slots:
+                # Guard against setting unit title or unit code as lecturer name
+                unit_title = slot.unit.name if slot.unit and slot.unit.name else ""
+                if unit_title and clean_display.lower() == unit_title.strip().lower():
+                    continue
+
                 fields_to_update = []
 
                 if lecturer and slot.lecturer_id != lecturer.id:
@@ -157,7 +171,6 @@ class AssignLecturersAPIView(APIView):
                     fields_to_update.append("lecturer")
 
                 if hasattr(slot, "lecturer_name_text"):
-                    clean_display = re.sub(r"\(.*?\)", "", lecturer_name).strip()
                     if slot.lecturer_name_text != clean_display:
                         slot.lecturer_name_text = clean_display
                         fields_to_update.append("lecturer_name_text")
@@ -175,7 +188,7 @@ class AssignLecturersAPIView(APIView):
 
         slots_updated_total = sum(r["slots_updated"] for r in results)
 
-        # Clear student cache so all updated slots immediately reflect
+        # Invalidate student cache across Redis/memory
         try:
             PersonalizationCacheService.clear_all()
         except Exception:

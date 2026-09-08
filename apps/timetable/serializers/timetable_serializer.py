@@ -125,6 +125,13 @@ class TimetableSlotDetailedSerializer(serializers.ModelSerializer):
                 return name
         return getattr(obj, "lecturer_name_text", "") or ""
 
+    def get_lecturer_display(self, obj) -> str:
+        if obj.lecturer and hasattr(obj.lecturer, "user") and obj.lecturer.user:
+            name = obj.lecturer.user.get_full_name().strip()
+            if name:
+                return name
+        return getattr(obj, "lecturer_name_text", "") or ""
+
 
 class TimetableSlotSerializer(serializers.ModelSerializer):
     """Standard serializer for TimetableSlot model."""
@@ -133,10 +140,13 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
     instructor = serializers.SerializerMethodField()
     location = serializers.CharField(source="room.code", read_only=True)
 
-    curriculum_unit_display = serializers.CharField(source="unit.__str__", read_only=True)
+    curriculum_unit_display = serializers.CharField(
+        source="unit.__str__",
+        read_only=True,
+    )
     lecturer_display = serializers.SerializerMethodField()
     room_display = serializers.CharField(source="room.code", read_only=True)
-
+    
     class Meta:
         model = TimetableSlot
         fields = (
@@ -155,6 +165,7 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
             "class_group",
             "upload_batch",
             "created_at",
+
             # Frontend-friendly aliases
             "subject",
             "instructor",
@@ -163,10 +174,12 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "created_at")
 
     def get_instructor(self, obj) -> str:
+        # 1. First check if a registered Lecturer user account exists
         if obj.lecturer and hasattr(obj.lecturer, "user") and obj.lecturer.user:
             name = obj.lecturer.user.get_full_name().strip()
             if name:
                 return name
+        # 2. Fall back to the name parsed from the .docx file!
         return getattr(obj, "lecturer_name_text", "") or ""
 
     def get_lecturer_display(self, obj) -> str:
