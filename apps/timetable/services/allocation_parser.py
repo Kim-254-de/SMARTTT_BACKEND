@@ -14,83 +14,84 @@ def clean_lecturer_name(raw_name: str) -> str:
         name = name.split('/')[0]
     return " ".join(name.split()).strip()
 
-def parse_allocation_docx(file_path: str):
-    doc = docx.Document(file_path)
-    allocation_rows = []
+def parse_allocation_docx(file_path: str) -> list[dict]:
+    """
+    Parses departmental allocation Word document (.docx).
+    Dynamically finds the 'LECTURER' and 'CODE' columns in each table
+    regardless of merged cells or formatting differences.
+    """
+    doc = Document(file_path)
+    allocations = []
 
     for table in doc.tables:
         header_map = {}
-        
-        # Scan header row to identify column mappings dynamically
-        for r_idx, row in enumerate(table.rows[:3]):
-            row_texts = [c.text.strip().upper() for c in row.cells]
+        header_row_idx = None
+
+        # 1. Detect the table header row
+        for row_idx, row in enumerate(table.rows[:5]):
+            row_texts = [cell.text.strip().lower() for cell in row.cells]
             for col_idx, text in enumerate(row_texts):
-                if "LECTURER" in text:
-                    header_map["lecturer_col"] = col_idx
-                elif "COURSE CODE" in text or "CODE" in text:
-                    header_map["code_col"] = col_idx
-                elif "TITLE" in text:
-                    header_map["title_col"] = col_idx
+                if "code" in text:
+                    header_map["code"] = col_idx
+                elif "title" in text:
+                    header_map["title"] = col_idx
+                elif "lecturer" in text or "instructor" in text:
+                    header_map["lecturer"] = col_idx
 
-        # If no explicit header detected, default standard positions
-        lecturer_col = header_map.get("lecturer_col", -2)
+            if "code" in header_map and "lecturer" in header_map:
+                header_row_idx = row_idx
+                break
 
-        for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells]
-            if len(cells) < 2:
+        # If no explicit header was found, skip this table
+        if header_row_idx is None:
+            continue
+
+        code_col = header_map["code"]
+        title_col = header_map.get("title")
+        lecturer_col = header_map["lecturer"]
+
+        # 2. Extract rows using distinct cell boundaries
+        for row in table.rows[header_row_idx + 1:]:
+            cells = row.cells
+            # Filter out duplicate merged cell references in python-docx
+            unique_cells = []
+            for cell in cells:
+                if not unique_cells or cell._tc != unique_cells[-1]._tc:
+                    unique_cells.append(cell)
+
+            if len(unique_cells) <= max(code_col, lecturer_col):
                 continue
 
-            first_cell = cells[0].strip()
-            match = UNIT_CODE_REGEX.search(first_cell)
-            if not match:
+            raw_code = unique_cells[code_col].text.strip()
+            raw_lecturer = unique_cells[lecturer_col].text.strip()
+            raw_title = unique_cells[title_col].text.strip() if title_col and len(unique_cells) > title_col else ""
+
+            # Check if this row is a valid course code
+            compact_code = re.sub(r"[^A-Z0-9]", "", raw_code.upper())
+            if not re.match(r"^[A-Z]{3,4}\d{3,5}", compact_code):
                 continue
 
-            dept, num = match.groups()
-            normalized_code = f"{dept.upper()}{num}"
-            raw_code = f"{dept.upper()} {num}"
+            # If the extracted lecturer text accidentally equals the course title,
+            # find the first cell containing '(ft)', '(pt)', or person titles
+            if raw_title and raw_lecturer.strip().lower() == raw_title.strip().lower():
+                for c in unique_cells:
+                    t = c.text.strip()
+                    if re.search(r"\(FT\)|\(PT\)|Dr\.|Prof\.|Mr\.|Mrs\.", t, re.IGNORECASE):
+                        raw_lecturer = t
+                        break
 
-            # Group hint if present (e.g., 'COSC 103 Group A')
-            group_hint = ""
-            grp_search = re.search(r'(Group\s+[A-Za-z0-9]+|GRP\s+[A-Za-z0-9]+)', first_cell, re.I)
-            if grp_search:
-                group_hint = grp_search.group(1).upper()
-
-            # Find lecturer text
-            raw_lecturer = ""
-            if isinstance(lecturer_col, int) and len(cells) > lecturer_col:
-                raw_lecturer = cells[lecturer_col]
-
-            # If header index failed or grabbed title/blank, find cell with lecturer text
-            if not raw_lecturer or raw_lecturer.upper() in ["L", "P", "CF", "TOTAL"]:
-                for cell in reversed(cells):
-                    ctext = cell.strip()
-                    if not ctext or re.match(r'^\d+(\.\d+)?$', ctext) or "TOTAL" in ctext.upper():
-                        continue
-                    # Ignore phone number cell
-                    if re.match(r'^(07|01|\+254|\d{9,})', ctext):
-                        continue
-                    # Ignore course title (if cell matches known title)
-                    if len(cells) > 1 and ctext == cells[1].strip():
-                        continue
-                    raw_lecturer = ctext
-                    break
-
-            cleaned_lecturer = clean_lecturer_name(raw_lecturer)
-
-            # Extra guard: Never accept the unit title or 'CO-ORDINATION' as lecturer name
-            if len(cells) > 1 and cleaned_lecturer.lower() == clean_lecturer_name(cells[1]).lower():
-                continue
-            if "co-ordination" in cleaned_lecturer.lower() or not cleaned_lecturer:
+            # Ignore non-lecturer headers or co-ordination placeholders
+            if not raw_lecturer or "co-ordination" in raw_lecturer.lower() or "total" in raw_code.lower():
                 continue
 
-            allocation_rows.append({
-                "unit_code": normalized_code,
+            allocations.append({
+                "unit_code": compact_code,
                 "raw_unit_code": raw_code,
-                "group": group_hint,
-                "lecturer_name": cleaned_lecturer,
+                "unit_title": raw_title,
+                "lecturer_name": raw_lecturer,
             })
 
-    return allocation_rows
+    return allocations
 
 def parse_allocation_pdf(file_obj):
     """Parses course allocation tables from a .pdf document."""

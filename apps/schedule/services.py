@@ -140,27 +140,31 @@ def generate_for_user(user) -> dict:
 
 
 def _serialise_slot(slot: TimetableSlot) -> dict:
-    # 1. Registered Lecturer account
-    lecturer_display = None
-    if slot.lecturer and hasattr(slot.lecturer, "user") and slot.lecturer.user:
-        lecturer_display = slot.lecturer.user.get_full_name().strip()
+    unit_code = slot.unit.code if slot.unit else ""
+    # Use real unit title if available, otherwise fallback to slot.unit.name
+    unit_title = slot.unit.name if slot.unit and slot.unit.name != unit_code else unit_code
 
-    # 2. Text name populated from docx allocation
-    if not lecturer_display:
-        text_val = getattr(slot, "lecturer_name_text", "") or ""
-        # Guard against corrupt text matching the unit name or code
-        if text_val and text_val.strip().lower() != slot.unit.name.strip().lower() and text_val.strip().lower() != slot.unit.code.strip().lower():
-            lecturer_display = text_val.strip()
+    # 1. Registered lecturer FK
+    lecturer_name = None
+    if slot.lecturer and hasattr(slot.lecturer, "user") and slot.lecturer.user:
+        lecturer_name = slot.lecturer.user.get_full_name().strip()
+
+    # 2. Text name from Word allocation
+    if not lecturer_name:
+        candidate = getattr(slot, "lecturer_name_text", "") or ""
+        # GUARD: Ensure candidate is not just the course title or course code!
+        if candidate and candidate.strip().lower() != unit_title.strip().lower() and candidate.strip().lower() != unit_code.strip().lower():
+            lecturer_name = candidate.strip()
 
     return {
         "id": str(slot.id),
-        "unit_code": slot.unit.code,
-        "unit_name": slot.unit.name,
+        "unit_code": unit_code,
+        "unit_name": unit_title,
         "day": slot.day_of_week.upper() if slot.day_of_week else "MON",
         "start_time": slot.start_time.strftime("%H:%M") if slot.start_time else "",
         "end_time": slot.end_time.strftime("%H:%M") if slot.end_time else "",
         "room": slot.room.code if slot.room else "TBA",
-        "lecturer": lecturer_display or "No lecturer assigned",
+        "lecturer": lecturer_name or "Lecturer TBA",
         "program": slot.program.name if slot.program else None,
         "year_of_study": slot.year_of_study,
     }
