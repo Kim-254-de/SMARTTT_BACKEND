@@ -60,15 +60,34 @@ class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        s = LoginSerializer(data=request.data)
-        s.is_valid(raise_exception=True)
-        user = authenticate(
-            username=s.validated_data["email"].lower(),
-            password=s.validated_data["password"],
-        )
+        login_id = str(request.data.get('email') or request.data.get('username') or request.data.get('staff_id') or '').strip()
+        password = request.data.get('password')
+        
+        if not login_id or not password:
+            return Response({"detail": "Username/email/staff ID and password are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Look up user by email, username, OR university_id (staff ID / phone number)
+        user_obj = User.objects.filter(
+            Q(email__iexact=login_id) | 
+            Q(username__iexact=login_id) | 
+            Q(university_id__iexact=login_id)
+        ).first()
+
+        user = None
+        if user_obj:
+            user = authenticate(username=user_obj.username, password=password)
+        else:
+            user = authenticate(username=login_id, password=password)
+
         if user is None:
             return Response({"detail": "Invalid credentials."}, status=status.HTTP_401_UNAUTHORIZED)
-        return Response({"user": UserSerializer(user).data, **_tokens(user)})
+
+        tokens = get_tokens_for_user(user)
+        return Response({
+            "access": tokens['access'],
+            "refresh": tokens['refresh'],
+            "user": serialize_user(user)
+        })
 
 
 class ProfileView(APIView):
