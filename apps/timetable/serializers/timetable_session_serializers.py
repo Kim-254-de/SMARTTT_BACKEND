@@ -3,6 +3,7 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.timetable.models import TimetableSession
 from apps.units.serializers import UnitSerializer
+from apps.timetable.models import TimetableSlot
 from apps.lecturers.serializers import LecturerSerializer
 from apps.programs.serializers import ProgramSerializer
 from apps.departments.serializers import DepartmentSerializer
@@ -48,11 +49,33 @@ class TimetableSessionListSerializer(serializers.ModelSerializer):
         ]
 
     def get_lecturer_name(self, obj) -> str:
+        # 1. Registered lecturer account
         if obj.lecturer and hasattr(obj.lecturer, "user") and obj.lecturer.user:
             name = obj.lecturer.user.get_full_name().strip()
             if name:
                 return name
-        return getattr(obj, "lecturer_name_text", "") or ""
+
+        # 2. Check if text was saved directly
+        if getattr(obj, "lecturer_name_text", None):
+            return obj.lecturer_name_text
+
+        # 3. Match from the TimetableSlot where the Word allocation doc populated names!
+        slot = TimetableSlot.objects.filter(
+            unit_id=obj.unit_id,
+            day_of_week=obj.day_of_week,
+        ).exclude(lecturer_name_text="").first()
+
+        if slot and slot.lecturer_name_text:
+            return slot.lecturer_name_text
+
+        # Fallback to any slot for this unit with a lecturer name
+        fallback_slot = TimetableSlot.objects.filter(
+            unit_id=obj.unit_id
+        ).exclude(lecturer_name_text="").first()
+        if fallback_slot and fallback_slot.lecturer_name_text:
+            return fallback_slot.lecturer_name_text
+
+        return None
 
     def get_time_range(self, obj) -> str:
         """Get formatted time range."""

@@ -5,13 +5,12 @@ Algorithm:
   1. Get the student's registered units for the current term (StudentUnit table)
   2. Get the current academic term
   3. Query TimetableSlot WHERE unit IN student_units AND term = current_term
-  4. Group slots by day, sort by start_time
-  5. Detect and flag time conflicts
-  6. Return structured payload
+  4. Deduplicate identical slots caused by multiple timetable uploads
+  5. Group slots by day, sort by start_time
+  6. Detect and flag legitimate time conflicts
+  7. Return structured payload
 """
 from __future__ import annotations
-
-from collections import defaultdict
 
 from apps.courses.models import StudentUnit
 from apps.timetable.models import AcademicTerm, TimetableSlot
@@ -28,11 +27,11 @@ def generate_for_user(user) -> dict:
     """
     Returns:
     {
-        "term": "2025/2026 Sem 1",
+        "term": "2026/2027 S1",
         "units": [...],
         "timetable": {"MON": [...], "TUE": [...], ...},
         "conflicts": [...],
-        "summary": {"unit_count": 4, "session_count": 12, "has_conflicts": false}
+        "summary": {"unit_count": 5, "session_count": 5, "has_conflicts": false}
     }
     """
     # ── 1. Current term ────────────────────────────────────────────────────────
@@ -43,8 +42,12 @@ def generate_for_user(user) -> dict:
             "units": [],
             "timetable": {day: [] for day in DAY_ORDER},
             "conflicts": [],
-            "summary": {"unit_count": 0, "session_count": 0, "has_conflicts": False,
-                        "message": "No current academic term configured."},
+            "summary": {
+                "unit_count": 0,
+                "session_count": 0,
+                "has_conflicts": False,
+                "message": "No current academic term configured.",
+            },
         }
 
     # ── 2. Student's registered units this term ────────────────────────────────
@@ -64,35 +67,58 @@ def generate_for_user(user) -> dict:
             "units": [],
             "timetable": {day: [] for day in DAY_ORDER},
             "conflicts": [],
-            "summary": {"unit_count": 0, "session_count": 0, "has_conflicts": False,
-                        "message": "No registered units found. Use My Courses to sync your units."},
+            "summary": {
+                "unit_count": 0,
+                "session_count": 0,
+                "has_conflicts": False,
+                "message": "No registered units found. Use Sync to update your schedule.",
+            },
         }
 
     # ── 3. Fetch matching timetable slots ──────────────────────────────────────
-    slots = list(
+    raw_slots = list(
         TimetableSlot.objects.select_related(
             "unit", "program", "lecturer__user", "room", "term"
-        ).filter(term=term, unit_id__in=unit_ids)
+        )
+        .filter(term=term, unit_id__in=unit_ids)
         .annotate(_day_sort=day_of_week_sort_case())
         .order_by("_day_sort", "start_time")
     )
 
+    # ── 3b. DEDUPLICATION: Purge duplicate slots from repeated file uploads ─────
+    seen_signatures = set()
+    slots: list[TimetableSlot] = []
+    for slot in raw_slots:
+        # Signature uniquely identifies a distinct scheduled session
+        signature = (
+            slot.unit_id,
+            slot.day_of_week.upper() if slot.day_of_week else "",
+            slot.start_time,
+            slot.end_time,
+            slot.room_id,
+        )
+        if signature not in seen_signatures:
+            seen_signatures.add(signature)
+            slots.append(slot)
+
     # ── 4. Group by day ────────────────────────────────────────────────────────
     grouped: dict[str, list] = {day: [] for day in DAY_ORDER}
     for slot in slots:
-        grouped.setdefault(slot.day_of_week.upper(), []).append(_serialise_slot(slot))
+        day_key = slot.day_of_week.upper() if slot.day_of_week else "MON"
+        grouped.setdefault(day_key, []).append(_serialise_slot(slot))
 
     # Sort each day by start_time
     for day in grouped:
         grouped[day].sort(key=lambda s: s["start_time"])
 
-    # ── 5. Detect conflicts (two slots on same day overlapping in time) ────────
+    # ── 5. Detect genuine conflicts between DIFFERENT units ────────────────────
     conflicts = []
-    for day, day_slots in grouped.items():
-        raw_day_slots = [s for s in slots if s.day_of_week.upper() == day]
+    for day, _ in grouped.items():
+        raw_day_slots = [s for s in slots if s.day_of_week and s.day_of_week.upper() == day]
         for i, a in enumerate(raw_day_slots):
             for b in raw_day_slots[i + 1:]:
-                if _has_overlap(a, b):
+                # Only flag conflicts between different course units
+                if a.unit_id != b.unit_id and _has_overlap(a, b):
                     conflicts.append({
                         "day": day,
                         "unit_a": a.unit.code,
@@ -114,19 +140,27 @@ def generate_for_user(user) -> dict:
 
 
 def _serialise_slot(slot: TimetableSlot) -> dict:
+    # 1. Registered Lecturer account
+    lecturer_display = None
+    if slot.lecturer and hasattr(slot.lecturer, "user") and slot.lecturer.user:
+        lecturer_display = slot.lecturer.user.get_full_name().strip()
+
+    # 2. Text name populated from docx allocation
+    if not lecturer_display:
+        text_val = getattr(slot, "lecturer_name_text", "") or ""
+        # Guard against corrupt text matching the unit name or code
+        if text_val and text_val.strip().lower() != slot.unit.name.strip().lower() and text_val.strip().lower() != slot.unit.code.strip().lower():
+            lecturer_display = text_val.strip()
+
     return {
         "id": str(slot.id),
         "unit_code": slot.unit.code,
         "unit_name": slot.unit.name,
-        "day": slot.day_of_week.upper(),
-        "start_time": slot.start_time.strftime("%H:%M"),
-        "end_time": slot.end_time.strftime("%H:%M"),
-        "room": slot.room.code if slot.room else None,
-        "lecturer": (
-            slot.lecturer.user.get_full_name()
-            if slot.lecturer
-            else slot.lecturer_name_text or None  # ← add this fallback
-        ),
+        "day": slot.day_of_week.upper() if slot.day_of_week else "MON",
+        "start_time": slot.start_time.strftime("%H:%M") if slot.start_time else "",
+        "end_time": slot.end_time.strftime("%H:%M") if slot.end_time else "",
+        "room": slot.room.code if slot.room else "TBA",
+        "lecturer": lecturer_display or "No lecturer assigned",
         "program": slot.program.name if slot.program else None,
         "year_of_study": slot.year_of_study,
     }
