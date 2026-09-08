@@ -28,12 +28,18 @@ class PortalSyncView(APIView):
                 s.validated_data["portal_password"],
             )
         except ScraperError as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            if exc.code == "invalid_credentials":
+                detail = "The portal admission number or password is incorrect."
+            elif exc.code == "portal_unavailable":
+                detail = "The student portal is currently unavailable. Please try again later."
+            else:
+                detail = "We could not read your portal details. Please try again."
+            return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
 
         if not unit_list:
             return Response(
-                {"detail": "No registered units found on the portal. "
-                           "Make sure you have registered units for this semester."},
+                {"detail": "No registered units are available for this semester. "
+                           "Please confirm your units are registered on the portal."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
