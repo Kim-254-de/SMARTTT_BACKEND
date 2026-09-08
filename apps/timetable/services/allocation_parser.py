@@ -1,18 +1,9 @@
+from __future__ import annotations
+
+import os
 import re
-import docx
-import pdfplumber
+from docx import Document
 
-UNIT_CODE_REGEX = re.compile(r'([A-Z]{2,5})\s*(\d{3,5})', re.IGNORECASE)
-
-def clean_lecturer_name(raw_name: str) -> str:
-    """Strips (FT), (PT), slashes, phone numbers, and academic titles."""
-    name = re.sub(r'\(.*?\)', '', raw_name)
-    name = re.sub(r'\b(dr|prof|mr|mrs|ms)\b\.?', '', name, flags=re.IGNORECASE)
-    # If cell contains phone numbers, remove them
-    name = re.sub(r'07\d{8}|01\d{8}|\+254\d+', '', name)
-    if '/' in name:
-        name = name.split('/')[0]
-    return " ".join(name.split()).strip()
 
 def parse_allocation_docx(file_path: str) -> list[dict]:
     """
@@ -64,15 +55,19 @@ def parse_allocation_docx(file_path: str) -> list[dict]:
 
             raw_code = unique_cells[code_col].text.strip()
             raw_lecturer = unique_cells[lecturer_col].text.strip()
-            raw_title = unique_cells[title_col].text.strip() if title_col and len(unique_cells) > title_col else ""
+            raw_title = (
+                unique_cells[title_col].text.strip()
+                if title_col is not None and len(unique_cells) > title_col
+                else ""
+            )
 
-            # Check if this row is a valid course code
+            # Check if this row has a valid course code format (e.g. COSC 434)
             compact_code = re.sub(r"[^A-Z0-9]", "", raw_code.upper())
             if not re.match(r"^[A-Z]{3,4}\d{3,5}", compact_code):
                 continue
 
             # If the extracted lecturer text accidentally equals the course title,
-            # find the first cell containing '(ft)', '(pt)', or person titles
+            # search across cells for teacher indicators like (FT), (PT), Dr., etc.
             if raw_title and raw_lecturer.strip().lower() == raw_title.strip().lower():
                 for c in unique_cells:
                     t = c.text.strip()
@@ -93,41 +88,28 @@ def parse_allocation_docx(file_path: str) -> list[dict]:
 
     return allocations
 
-def parse_allocation_pdf(file_obj):
-    """Parses course allocation tables from a .pdf document."""
-    allocation_rows = []
 
-    with pdfplumber.open(file_obj) as pdf:
-        for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
-                for row in table:
-                    if not row or len(row) < 2:
-                        continue
+def parse_allocation_pdf(file_obj) -> list[dict]:
+    """PDF parser fallback if a PDF allocation file is uploaded."""
+    import pypdf
 
-                    first_cell = (row[0] or "").strip()
-                    if not UNIT_CODE_REGEX.match(first_cell):
-                        continue
+    reader = pypdf.PdfReader(file_obj)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text() or ""
 
-                    lecturer = ""
-                    for idx in [5, 4, 3, -2]:
-                        if len(row) > idx and row[idx]:
-                            val = row[idx].strip()
-                            if not re.match(r'^\d+(\.\d+)?$', val) and val.upper() not in ["L", "P", "CF", "TOTAL"]:
-                                lecturer = val
-                                break
-
-                    if not lecturer:
-                        continue
-
-                    unit_code = clean_unit_code(first_cell)
-                    clean_lecturer = clean_lecturer_name(lecturer)
-
-                    if unit_code and clean_lecturer:
-                        allocation_rows.append({
-                            "raw_unit_code": first_cell,
-                            "unit_code": unit_code,
-                            "lecturer_name": clean_lecturer,
-                        })
-
-    return allocation_rows
+    rows = []
+    lines = text.split("\n")
+    for line in lines:
+        match = re.search(r"([A-Z]{3,4}\s*\d{3,5})\s+(.+?)\s+([A-Z][a-zA-Z\s\.\(\)\/]+?)\s+(07\d{8}|01\d{8})?", line)
+        if match:
+            raw_code, raw_title, raw_lecturer = match.group(1), match.group(2), match.group(3)
+            compact = re.sub(r"[^A-Z0-9]", "", raw_code.upper())
+            if not any(k in raw_lecturer.lower() for k in ["total", "co-ordination"]):
+                rows.append({
+                    "unit_code": compact,
+                    "raw_unit_code": raw_code.strip(),
+                    "unit_title": raw_title.strip(),
+                    "lecturer_name": raw_lecturer.strip(),
+                })
+    return rows
