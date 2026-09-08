@@ -13,7 +13,7 @@ class PersonalizedTimetableService:
     """Coordinate student resolution, filtering, sorting, deduplication, and response shaping."""
 
     @staticmethod
-    def generate_personalized_timetable(student, use_cache: bool = True) -> dict:
+    def generate_personalized_timetable(student, use_cache: bool = False) -> dict:
         resolved = StudentUnitResolutionService.resolve_student_units(student)
 
         if use_cache:
@@ -28,17 +28,17 @@ class PersonalizedTimetableService:
             semester=resolved.semester,
         )
 
-        # Deduplicate identical sessions (same unit, day, start_time, end_time, and room)
+        # Deduplicate multiple upload copies of the same class
         seen_keys = set()
         deduped_sessions = []
         for s in sessions:
-            unit_code = getattr(s.unit, "code", str(getattr(s, "unit_id", "")))
+            unit_id = str(getattr(s, "unit_id", ""))
             day = getattr(s, "day_of_week", "")
-            time_start = getattr(s.time_slot, "start_time", None) if hasattr(s, "time_slot") else getattr(s, "start_time", None)
-            time_end = getattr(s.time_slot, "end_time", None) if hasattr(s, "time_slot") else getattr(s, "end_time", None)
-            room_code = getattr(s.room, "code", "") if hasattr(s, "room") and s.room else ""
+            slot_id = str(getattr(s, "time_slot_id", ""))
+            room_id = str(getattr(s, "room_id", ""))
 
-            key = (unit_code, day, str(time_start), str(time_end), room_code)
+            # Unique key represents a distinct scheduled class
+            key = (unit_id, day, slot_id, room_id)
             if key not in seen_keys:
                 seen_keys.add(key)
                 deduped_sessions.append(s)

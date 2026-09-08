@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from datetime import time
+from apps.timetable.models import TimetableSlot
 
 DAY_ORDER = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
 
@@ -38,21 +39,46 @@ def serialize_unit(unit) -> dict:
 
 
 def serialize_session(session) -> dict:
-    # 1. First check registered lecturer account
+    # 1. First check registered lecturer account on TimetableSession
     lecturer_name = None
     if session.lecturer and hasattr(session.lecturer, "user") and session.lecturer.user:
         lecturer_name = session.lecturer.user.get_full_name().strip()
 
-    # 2. Fall back to text field on session or related slot
+    # 2. If null, fetch the lecturer name from TimetableSlot (populated by docx allocation)
     if not lecturer_name:
-        lecturer_name = getattr(session, "lecturer_name_text", "") or ""
+        slot = TimetableSlot.objects.filter(
+            unit_id=session.unit_id,
+            day_of_week=session.day_of_week,
+        ).exclude(lecturer_name_text="").first()
 
-    if not lecturer_name and hasattr(session, "slot"):
-        lecturer_name = getattr(session.slot, "lecturer_name_text", "") or ""
+        if slot and slot.lecturer_name_text:
+            lecturer_name = slot.lecturer_name_text
+        elif slot and slot.lecturer and slot.lecturer.user:
+            lecturer_name = slot.lecturer.user.get_full_name().strip()
 
-    start_time_val = getattr(session.time_slot, "start_time", None) if hasattr(session, "time_slot") else getattr(session, "start_time", None)
-    end_time_val = getattr(session.time_slot, "end_time", None) if hasattr(session, "time_slot") else getattr(session, "end_time", None)
-    slot_name_val = getattr(session.time_slot, "slot_name", "") if hasattr(session, "time_slot") else ""
+    # Fallback to general unit slot if day match had no lecturer
+    if not lecturer_name:
+        slot = TimetableSlot.objects.filter(
+            unit_id=session.unit_id
+        ).exclude(lecturer_name_text="").first()
+        if slot:
+            lecturer_name = slot.lecturer_name_text
+
+    start_time_val = (
+        getattr(session.time_slot, "start_time", None)
+        if hasattr(session, "time_slot") and session.time_slot
+        else getattr(session, "start_time", None)
+    )
+    end_time_val = (
+        getattr(session.time_slot, "end_time", None)
+        if hasattr(session, "time_slot") and session.time_slot
+        else getattr(session, "end_time", None)
+    )
+    slot_name_val = (
+        getattr(session.time_slot, "slot_name", "")
+        if hasattr(session, "time_slot") and session.time_slot
+        else ""
+    )
 
     return {
         "id": str(session.id),
