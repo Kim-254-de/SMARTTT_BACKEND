@@ -336,9 +336,15 @@ class LecturerProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        from datetime import datetime as _dt
+
+        import pytz
+        from django.db.models import Count, Q
+
+        from apps.courses.models import StudentUnit
+        from apps.core.models import Lecturer
         from apps.timetable.models import AcademicTerm, TimetableSlot
         from apps.timetable.serializers import TimetableSlotSerializer
-        from apps.core.models import Lecturer
 
         user = request.user
         if user.role not in ["lecturer"]:
@@ -347,6 +353,7 @@ class LecturerProfileView(APIView):
         term = AcademicTerm.objects.filter(is_current=True).first()
         slots = []
         slot_source = "none"
+        lecturer_profile = None
 
         if term:
             # ── Priority 1: slots directly assigned via lecturer FK ───────────
@@ -368,7 +375,6 @@ class LecturerProfileView(APIView):
                 first_name = user.first_name.strip()
                 last_name = user.last_name.strip()
 
-                from django.db.models import Q
                 name_matched_slots = TimetableSlot.objects.select_related(
                     "unit", "program", "room", "term"
                 ).filter(
@@ -384,7 +390,6 @@ class LecturerProfileView(APIView):
                     slots = TimetableSlotSerializer(name_matched_slots, many=True).data
                     slot_source = "name_matched"
 
-                    # Auto-link the lecturer FK now that we found a match
                     try:
                         lecturer_profile = Lecturer.objects.get(user=user)
                     except Lecturer.DoesNotExist:
@@ -398,11 +403,105 @@ class LecturerProfileView(APIView):
             if not slots:
                 slot_source = "no_match"
 
+        tz = pytz.timezone("Africa/Nairobi")
+        now_local = _dt.now(tz)
+        today_code = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"][now_local.weekday()]
+        day_order = ["MON", "TUE", "WED", "THU", "FRI", "SAT"]
+
+        allocated_units = sorted({slot.get("unit_code") for slot in slots if slot.get("unit_code")})
+        unit_ids = {slot.get("unit") for slot in slots if slot.get("unit")}
+
+        student_counts_by_unit = {}
+        total_students = 0
+        if term and unit_ids:
+            rows = (
+                StudentUnit.objects.filter(unit_id__in=unit_ids, term=term)
+                .values("unit_id")
+                .annotate(count=Count("id"))
+            )
+            student_counts_by_unit = {str(row["unit_id"]): row["count"] for row in rows}
+            total_students = (
+                StudentUnit.objects.filter(unit_id__in=unit_ids, term=term)
+                .values("user_id")
+                .distinct()
+                .count()
+            )
+
+        def _parse_time(value):
+            if not value:
+                return None
+            if isinstance(value, str):
+                return _dt.strptime(value, "%H:%M:%S").time()
+            return value
+
+        timetable_grouped = {day: [] for day in day_order}
+        today_sessions = []
+        completed_today = 0
+        remaining_today = 0
+
+        for slot in slots:
+            day = (slot.get("day") or "mon").upper()
+            if day not in timetable_grouped:
+                day = "MON"
+
+            start_time = _parse_time(slot.get("start_time"))
+            end_time = _parse_time(slot.get("end_time"))
+            session = {
+                "id": slot.get("id"),
+                "unit_code": slot.get("unit_code"),
+                "unit_name": slot.get("unit_name"),
+                "day": day,
+                "start_time": start_time.strftime("%H:%M") if start_time else "",
+                "end_time": end_time.strftime("%H:%M") if end_time else "",
+                "room": slot.get("room_code") or "TBA",
+                "program": slot.get("program_name") or "",
+                "student_count": student_counts_by_unit.get(str(slot.get("unit")), 0),
+            }
+            timetable_grouped.setdefault(day, []).append(session)
+
+            if day == today_code:
+                now_t = now_local.time()
+                if start_time and end_time:
+                    if now_t > end_time:
+                        status = "completed"
+                        completed_today += 1
+                    elif start_time <= now_t <= end_time:
+                        status = "now"
+                        remaining_today += 1
+                    else:
+                        status = "upcoming"
+                        remaining_today += 1
+                    today_sessions.append({**session, "status": status})
+
+        for day in timetable_grouped:
+            timetable_grouped[day].sort(key=lambda item: item["start_time"])
+        today_sessions.sort(key=lambda item: item["start_time"])
+
+        lecturer_info = None
+        if lecturer_profile:
+            lecturer_info = {
+                "staff_id": user.university_id or "",
+                "department": lecturer_profile.department.name if lecturer_profile.department else "",
+                "rank": getattr(lecturer_profile, "title", "") or "",
+            }
+
         return Response({
             "user": UserSerializer(user).data,
             "current_term": str(term) if term else None,
             "slots": slots,
             "slot_source": slot_source,
+            "lecturer": lecturer_info,
+            "today": today_code,
+            "allocated_units": allocated_units,
+            "summary": {
+                "units_count": len(allocated_units),
+                "weekly_sessions": len(slots),
+                "total_students": total_students,
+                "completed_today": completed_today,
+                "remaining_today": remaining_today,
+            },
+            "timetable": timetable_grouped,
+            "today_sessions": today_sessions,
         })
 class LecturerStudentsView(APIView):
     """
