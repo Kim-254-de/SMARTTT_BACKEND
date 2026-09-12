@@ -2,7 +2,6 @@ from django.core.exceptions import ValidationError
 from django.core.validators import (
     FileExtensionValidator,
     RegexValidator,
-    URLValidator,
 )
 from django.db import models
 from django.utils.translation import gettext_lazy as _
@@ -115,15 +114,29 @@ class Student(BaseModel):
         help_text=_("Academic program the student is enrolled in"),
     )
 
+    # Multi-Tier Timetable Stream Fields
+    combination = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text=_("Subject combination or major/minor option (e.g., Mathematics/Chemistry)"),
+    )
+    timetable_group = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text=_("Timetable group or stream tag (e.g., GR K, Group 3, GR F)"),
+    )
+
     # Academic Progress
     current_study_year = models.PositiveSmallIntegerField(
         default=1,
-        validators=[],  # Validate in clean()
+        validators=[],
         help_text=_("Current year of study (1-based)"),
     )
     current_semester = models.PositiveSmallIntegerField(
         default=1,
-        validators=[],  # Validate in clean()
+        validators=[],
         help_text=_("Current semester (1-based)"),
     )
     admission_year = models.PositiveIntegerField(
@@ -174,6 +187,7 @@ class Student(BaseModel):
             models.Index(fields=["academic_status", "is_active"]),
             models.Index(fields=["admission_year"]),
             models.Index(fields=["current_study_year", "current_semester"]),
+            models.Index(fields=["timetable_group"]),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -199,7 +213,8 @@ class Student(BaseModel):
         ]
 
     def __str__(self) -> str:
-        return f"{self.registration_number} - {self.get_full_name()}"
+        group_str = f" [{self.timetable_group}]" if self.timetable_group else ""
+        return f"{self.registration_number} - {self.get_full_name()}{group_str}"
 
     def get_full_name(self) -> str:
         """Return student's full name."""
@@ -209,13 +224,11 @@ class Student(BaseModel):
         """Validate student data."""
         super().clean()
 
-        # Validate current study year
         if self.current_study_year < 1:
             raise ValidationError({
                 "current_study_year": _("Study year must be at least 1"),
             })
 
-        # Validate against program duration
         if self.program:
             if self.current_study_year > self.program.duration_years:
                 raise ValidationError({
@@ -224,13 +237,11 @@ class Student(BaseModel):
                     ),
                 })
 
-        # Validate current semester
         if self.current_semester < 1 or self.current_semester > 2:
             raise ValidationError({
                 "current_semester": _("Semester must be 1 or 2"),
             })
 
-        # Validate admission year
         from django.utils import timezone
         current_year = timezone.now().year
 
@@ -239,7 +250,6 @@ class Student(BaseModel):
                 "admission_year": _("Admission year cannot be in the future"),
             })
 
-        # Validate department belongs to program
         if self.program and self.program.department != self.department:
             raise ValidationError({
                 "department": _(
@@ -247,7 +257,6 @@ class Student(BaseModel):
                 ),
             })
 
-        # Email consistency check
         if self.user and self.email != self.user.email:
             raise ValidationError({
                 "email": _("Student email must match user account email"),
@@ -298,267 +307,3 @@ class Student(BaseModel):
         if not curriculum:
             return []
         return curriculum.curriculum_units.all()
-
-
-class AcademicProgress(BaseModel):
-    """
-    Tracks student academic performance over time.
-    
-    Records:
-    - Semester-wise GPA and CGPA
-    - Credit hours completed
-    - Academic status changes
-    """
-
-    class Status(models.TextChoices):
-        GOOD_STANDING = "good_standing", _("Good Standing")
-        WARNING = "warning", _("Academic Warning")
-        PROBATION = "probation", _("Academic Probation")
-        SUSPENSION = "suspension", _("Suspension")
-        DISMISSED = "dismissed", _("Dismissed")
-
-    student = models.ForeignKey(
-        Student,
-        on_delete=models.CASCADE,
-        related_name="academic_progress",
-        help_text=_("Student whose progress this record tracks"),
-    )
-
-    academic_year = models.CharField(
-        max_length=20,
-        help_text=_("Academic year (e.g., '2024/2025')"),
-        db_index=True,
-    )
-    study_year = models.PositiveSmallIntegerField(
-        help_text=_("Year of study during this period"),
-    )
-    semester = models.PositiveSmallIntegerField(
-        help_text=_("Semester during this period (1 or 2)"),
-    )
-
-    # Academic Metrics
-    gpa = models.DecimalField(
-        max_digits=4,
-        decimal_places=2,
-        default=0.00,
-        help_text=_("Semester GPA (0.00-4.00)"),
-    )
-    cgpa = models.DecimalField(
-        max_digits=4,
-        decimal_places=2,
-        default=0.00,
-        help_text=_("Cumulative GPA (0.00-4.00)"),
-    )
-    total_credits = models.PositiveIntegerField(
-        default=0,
-        help_text=_("Total credit hours completed"),
-    )
-    credits_this_semester = models.PositiveIntegerField(
-        default=0,
-        help_text=_("Credit hours completed this semester"),
-    )
-
-    # Status
-    academic_status = models.CharField(
-        max_length=20,
-        choices=Status.choices,
-        default=Status.GOOD_STANDING,
-        help_text=_("Academic standing for this period"),
-    )
-
-    # Metadata
-    recorded_by = models.ForeignKey(
-        "accounts.User",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="recorded_academic_progress",
-        help_text=_("User who recorded this progress"),
-    )
-
-    class Meta:
-        ordering = ["-academic_year", "-study_year", "-semester"]
-        indexes = [
-            models.Index(fields=["student", "academic_year"]),
-            models.Index(fields=["student", "-semester"]),
-            models.Index(fields=["academic_status"]),
-        ]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["student", "academic_year", "study_year", "semester"],
-                name="uq_academic_progress_student_period",
-            ),
-            models.CheckConstraint(
-                check=models.Q(gpa__gte=0, gpa__lte=4),
-                name="ck_academic_progress_gpa_range",
-            ),
-            models.CheckConstraint(
-                check=models.Q(cgpa__gte=0, cgpa__lte=4),
-                name="ck_academic_progress_cgpa_range",
-            ),
-        ]
-
-    def __str__(self) -> str:
-        return (
-            f"{self.student.registration_number} - "
-            f"{self.academic_year} (Y{self.study_year}S{self.semester}) "
-            f"GPA: {self.gpa}"
-        )
-
-    def clean(self) -> None:
-        """Validate academic progress data."""
-        super().clean()
-
-        if self.gpa < 0 or self.gpa > 4.0:
-            raise ValidationError({
-                "gpa": _("GPA must be between 0.00 and 4.00"),
-            })
-
-        if self.cgpa < 0 or self.cgpa > 4.0:
-            raise ValidationError({
-                "cgpa": _("CGPA must be between 0.00 and 4.00"),
-            })
-
-        if self.semester not in [1, 2]:
-            raise ValidationError({
-                "semester": _("Semester must be 1 or 2"),
-            })
-
-    def save(self, *args, **kwargs) -> None:
-        """Save with validation."""
-        self.full_clean()
-        super().save(*args, **kwargs)
-
-
-class StudentEnrollment(BaseModel):
-    """
-    Tracks student enrollment in curriculum for specific academic periods.
-    
-    Links:
-    - Student
-    - Curriculum
-    - Semester/Year
-    
-    Used to track which students are following which curriculum
-    """
-
-    class EnrollmentStatus(models.TextChoices):
-        ENROLLED = "enrolled", _("Enrolled")
-        COMPLETED = "completed", _("Completed")
-        WITHDRAWN = "withdrawn", _("Withdrawn")
-        FAILED = "failed", _("Failed")
-        SUSPENDED = "suspended", _("Suspended")
-        DEFERRED = "deferred", _("Deferred to Next Semester")
-
-    student = models.ForeignKey(
-        Student,
-        on_delete=models.CASCADE,
-        related_name="enrollments",
-        help_text=_("Student enrolling in curriculum"),
-    )
-    curriculum = models.ForeignKey(
-        "curriculum.Curriculum",
-        on_delete=models.PROTECT,
-        related_name="student_enrollments",
-        help_text=_("Curriculum being enrolled in"),
-    )
-
-    academic_year = models.CharField(
-        max_length=20,
-        help_text=_("Academic year of enrollment"),
-        db_index=True,
-    )
-    study_year = models.PositiveSmallIntegerField(
-        help_text=_("Year of study"),
-    )
-    semester = models.PositiveSmallIntegerField(
-        help_text=_("Semester (1 or 2)"),
-    )
-
-    enrollment_status = models.CharField(
-        max_length=20,
-        choices=EnrollmentStatus.choices,
-        default=EnrollmentStatus.ENROLLED,
-        db_index=True,
-        help_text=_("Current enrollment status"),
-    )
-    enrollment_date = models.DateTimeField(
-        auto_now_add=True,
-        help_text=_("Date of enrollment"),
-    )
-
-    # Notes for withdrawals/deferrals
-    notes = models.TextField(
-        blank=True,
-        help_text=_("Additional notes (e.g., reason for withdrawal)"),
-    )
-
-    class Meta:
-        ordering = ["-academic_year", "-study_year", "-semester"]
-        indexes = [
-            models.Index(fields=["student", "academic_year"]),
-            models.Index(fields=["curriculum", "academic_year"]),
-            models.Index(fields=["enrollment_status"]),
-        ]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["student", "curriculum", "academic_year", "study_year", "semester"],
-                name="uq_student_enrollment_period",
-            ),
-        ]
-
-    def __str__(self) -> str:
-        return (
-            f"{self.student.registration_number} - "
-            f"{self.curriculum.program.code} "
-            f"({self.academic_year})"
-        )
-
-    def clean(self) -> None:
-        """Validate enrollment data."""
-        super().clean()
-
-        if self.semester not in [1, 2]:
-            raise ValidationError({
-                "semester": _("Semester must be 1 or 2"),
-            })
-
-        # Ensure curriculum matches student's program and study year
-        if self.curriculum:
-            if self.curriculum.program != self.student.program:
-                raise ValidationError({
-                    "curriculum": _(
-                        "Curriculum must belong to student's program"
-                    ),
-                })
-
-            if self.curriculum.study_year != self.study_year:
-                raise ValidationError({
-                    "curriculum": _(
-                        "Curriculum study year must match enrollment study year"
-                    ),
-                })
-
-            if self.curriculum.semester != self.semester:
-                raise ValidationError({
-                    "curriculum": _(
-                        "Curriculum semester must match enrollment semester"
-                    ),
-                })
-
-    def save(self, *args, **kwargs) -> None:
-        """Save with validation."""
-        self.full_clean()
-        super().save(*args, **kwargs)
-
-    def is_active_enrollment(self) -> bool:
-        """Check if enrollment is currently active."""
-        return self.enrollment_status == self.EnrollmentStatus.ENROLLED
-
-    def can_be_withdrawn(self) -> bool:
-        """Check if enrollment can be withdrawn."""
-        return self.enrollment_status in [
-            self.EnrollmentStatus.ENROLLED,
-            self.EnrollmentStatus.DEFERRED,
-        ]
-

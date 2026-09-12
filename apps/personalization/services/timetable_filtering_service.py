@@ -6,7 +6,7 @@ from apps.personalization.selectors import PersonalizationSelector
 
 
 class TimetableFilteringService:
-	"""Database-driven timetable filtering."""
+	"""Database-driven timetable filtering supporting multi-tier group and combination matching."""
 
 	@staticmethod
 	def get_personalized_sessions(student, unit_ids: list[str], academic_year: str, semester: int):
@@ -16,4 +16,6 @@ class TimetableFilteringService:
 			study_year=student.current_study_year,
 			semester=semester,
 			academic_year=academic_year,
+			combination=getattr(student, 'combination', None),
+			timetable_group=getattr(student, 'timetable_group', None),
 		)

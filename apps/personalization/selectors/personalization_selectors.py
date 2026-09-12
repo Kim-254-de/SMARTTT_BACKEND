@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from django.db import models
 from django.db.models import QuerySet
 
 from apps.curriculum.models import Curriculum, CurriculumUnit
@@ -85,29 +86,43 @@ class PersonalizationSelector:
 		study_year: int,
 		semester: int,
 		academic_year: str,
+		combination: Optional[str] = None,
+		timetable_group: Optional[str] = None,
 	) -> QuerySet:
-		return (
-			TimetableSession.objects.select_related(
-				"unit",
-				"unit__department",
-				"program",
-				"department",
-				"lecturer",
-				"lecturer__user",
-				"room",
-				"time_slot",
-				"created_by",
-			)
-			.filter(
-				unit_id__in=unit_ids,
-				program_id=program_id,
-				study_year=study_year,
-				semester=semester,
-				academic_year=academic_year,
-				status__in=[
-					TimetableSession.Status.SCHEDULED,
-					TimetableSession.Status.ACTIVE,
-				],
-			)
-			.order_by("day_of_week", "time_slot__start_time", "unit__code")
+		qs = TimetableSession.objects.select_related(
+			"unit",
+			"unit__department",
+			"program",
+			"department",
+			"lecturer",
+			"lecturer__user",
+			"room",
+			"time_slot",
+			"created_by",
+		).filter(
+			unit_id__in=unit_ids,
+			program_id=program_id,
+			study_year=study_year,
+			semester=semester,
+			academic_year=academic_year,
+			status__in=[
+				TimetableSession.Status.SCHEDULED,
+				TimetableSession.Status.ACTIVE,
+			],
 		)
+
+		# Filter by specific timetable stream group if assigned
+		if timetable_group:
+			qs = qs.filter(
+				models.Q(class_group__iexact=timetable_group) | 
+				models.Q(class_group__icontains=timetable_group)
+			)
+
+		# Filter by combination/specialization option if assigned
+		if combination:
+			qs = qs.filter(
+				models.Q(combination__iexact=combination) | 
+				models.Q(combination__icontains=combination)
+			)
+
+		return qs.order_by("day_of_week", "time_slot__start_time", "unit__code")

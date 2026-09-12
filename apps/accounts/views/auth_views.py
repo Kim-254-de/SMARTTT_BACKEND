@@ -25,7 +25,6 @@ from apps.timetable.models import AcademicTerm
 
 resend.api_key = settings.RESEND_API_KEY
 
-# Using Django sessions instead of issuing JWTs; login the user to create a session
 
 def get_tokens_for_user(user):
     """Issue a fresh JWT access/refresh pair for a user."""
@@ -45,12 +44,15 @@ def serialize_user(user):
         "id": user.id,
         "email": user.email,
         "full_name": user.get_full_name(),
-        "role": user.role,  # <--- Added role so lecturer.html passes validation
+        "role": user.role,
         "admission_number": user.university_id,
         "course": getattr(program, 'name', None),
         "department": getattr(department, 'name', None),
         "year_of_study": getattr(student, 'current_study_year', None),
+        "combination": getattr(student, 'combination', None),
+        "timetable_group": getattr(student, 'timetable_group', None),
     }
+
 
 class RegisterView(APIView):
     permission_classes = [AllowAny]
@@ -64,6 +66,9 @@ class RegisterView(APIView):
         admission_number = data.get('admission_number')
         course_name = data.get('course')
         department_name = data.get('department')
+        combination = data.get('combination', '').strip()
+        timetable_group = data.get('timetable_group', '').strip()
+        
         try:
             year_of_study = int(data.get('year_of_study', 1))
         except (ValueError, TypeError):
@@ -92,7 +97,6 @@ class RegisterView(APIView):
             dept_code = re.sub(r'[^A-Z]', '', department_name.upper())[:20]
             if not dept_code: dept_code = department_name.upper()[:20]
 
-            # Use a generic faculty instead of naming it after the department
             faculty, _ = Faculty.objects.get_or_create(
                 code="GEN",
                 defaults={'name': 'General Faculty'}
@@ -151,7 +155,9 @@ class RegisterView(APIView):
                 program=program,
                 admission_year=admission_yr,
                 current_study_year=year_of_study,
-                current_semester=current_sem
+                current_semester=current_sem,
+                combination=combination,
+                timetable_group=timetable_group,
             )
 
         tokens = get_tokens_for_user(user)
@@ -161,17 +167,17 @@ class RegisterView(APIView):
             "user": serialize_user(user)
         }, status=status.HTTP_201_CREATED)
 
+
 class LoginView(APIView):
     permission_classes = [AllowAny]
 
     def post(self, request):
-        login_id = str(request.data.get('email') or request.data.get('username') or '').strip()
+        login_id = str(request.data.get('email') or request.data.get('username') or request.data.get('staff_id') or '').strip()
         password = request.data.get('password')
 
         if not login_id or not password:
             return Response({"detail": "Username/email/staff ID and password are required."}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Look up user by email, username, OR university_id (staff ID / phone number)
         user_obj = User.objects.filter(
             Q(email__iexact=login_id) | 
             Q(username__iexact=login_id) | 
@@ -193,6 +199,7 @@ class LoginView(APIView):
             "refresh": tokens['refresh'],
             "user": serialize_user(user)
         })
+
 
 class ProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -223,6 +230,11 @@ class ProfileView(APIView):
                     student.current_study_year = int(data['year_of_study'])
                 except (ValueError, TypeError):
                     pass
+            if 'combination' in data:
+                student.combination = str(data['combination']).strip()
+            if 'timetable_group' in data:
+                student.timetable_group = str(data['timetable_group']).strip()
+
             if 'course' in data and 'department' in data:
                 dept_code = re.sub(r'[^A-Z]', '', data['department'].upper())[:20]
                 if not dept_code: dept_code = data['department'].upper()[:20]
@@ -262,25 +274,6 @@ class ProfileView(APIView):
 
 
 class DeleteAccountView(APIView):
-    """
-    Self-service account deletion.
-
-    This is a SOFT delete: the account is deactivated (login blocked,
-    all outstanding JWTs blacklisted) but the underlying User row and
-    all academic records linked to it (enrollments, timetable history,
-    uploads, notifications, etc.) are kept intact for the institution's
-    records - nothing is actually erased.
-
-    If the user is a lecturer, they are automatically unassigned from
-    every timetable slot they're currently on (lecturer set to null on
-    those slots) as part of deletion, so the timetable doesn't keep
-    showing a deactivated lecturer as teaching a live class.
-
-    Requires the user's current password to confirm, since this is a
-    destructive, hard-to-reverse action initiated purely from a bearer
-    token - password confirmation guards against a leaked/stolen access
-    token being used to lock someone out of their own account.
-    """
     permission_classes = [IsAuthenticated]
 
     @transaction.atomic
@@ -305,8 +298,6 @@ class DeleteAccountView(APIView):
             from apps.timetable.models import TimetableSlot
             slots_unassigned = TimetableSlot.objects.filter(lecturer=lecturer).update(lecturer=None)
 
-        # Blacklist every outstanding refresh token for this user so
-        # existing sessions/devices can't keep using them after deletion.
         from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
         for token in OutstandingToken.objects.filter(user=user):
             BlacklistedToken.objects.get_or_create(token=token)
@@ -413,12 +404,6 @@ FIREBASE_VERIFY_URL = (
 
 
 class GoogleAuthView(APIView):
-    """
-    POST /api/v1/auth/google/
-    Body: { "id_token": "<Firebase ID token>" }
-    Returns: { "user": {...}, "access": "...", "refresh": "..." }
-    """
-
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -597,13 +582,11 @@ class LecturerProfileView(APIView):
         slot_source = "none"
 
         if term:
-            # 1. Ensure a Lecturer profile exists for this user
             lecturer_profile, _ = Lecturer.objects.get_or_create(
                 user=user,
                 defaults={"department": Department.objects.first(), "rank": ""}
             )
 
-            # 2. Extract name tokens (e.g. "Kevin" and "Tuei")
             first_name = user.first_name.strip()
             last_name = user.last_name.strip()
 
@@ -615,14 +598,12 @@ class LecturerProfileView(APIView):
             elif first_name:
                 name_query |= Q(lecturer_name_text__icontains=first_name)
 
-            # 3. Query slots matching FK or the text name from docx
             assigned_slots = TimetableSlot.objects.select_related(
                 "unit", "program", "room", "term"
             ).filter(
                 Q(term=term) & (Q(lecturer=lecturer_profile) | name_query)
             ).order_by("day_of_week", "start_time")
 
-            # Automatically associate unlinked slots to this lecturer FK
             if assigned_slots.exists():
                 slot_source = "assigned"
                 seen_signatures = set()
@@ -631,13 +612,11 @@ class LecturerProfileView(APIView):
                         slot.lecturer = lecturer_profile
                         slot.save(update_fields=["lecturer"])
 
-                    # Deduplicate identical sessions
                     sig = (slot.unit_id, slot.day_of_week, slot.start_time, slot.end_time, slot.room_id)
                     if sig in seen_signatures:
                         continue
                     seen_signatures.add(sig)
 
-                    # Build exact dictionary structure expected by lecturer.html
                     slots_data.append({
                         "id": str(slot.id),
                         "unit": str(slot.unit_id),
@@ -677,7 +656,6 @@ class LecturerStudentsView(APIView):
         if not term:
             return Response([])
 
-        # Retrieve enrolled students
         students_qs = StudentUnit.objects.select_related("user").filter(
             unit_id=unit_id, term=term
         )
