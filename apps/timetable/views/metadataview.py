@@ -41,7 +41,13 @@ class TimetableMetadataView(APIView):
         years = sorted(list(filtered_slots.values_list('year_of_study', flat=True).distinct()))
 
         # 3. Distinct Groups / Streams (e.g. GR K, Group 3, MAIN)
-        groups = sorted(list(filtered_slots.values_list('class_group', flat=True).distinct()))
+        groups = sorted(
+            list(
+                filtered_slots.exclude(class_group="")
+                .values_list('class_group', flat=True)
+                .distinct()
+            )
+        )
 
         return Response({
             "semester": current_term.semester,
