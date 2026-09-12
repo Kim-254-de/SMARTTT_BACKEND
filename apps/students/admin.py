@@ -10,7 +10,7 @@ from django.utils.translation import gettext_lazy as _
 from django.urls import reverse
 from django.db.models import Q
 
-from apps.students.models import Student, AcademicProgress, StudentEnrollment
+from apps.students.models import Student
 
 
 @admin.register(Student)
