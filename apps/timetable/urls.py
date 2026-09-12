@@ -24,5 +24,5 @@ urlpatterns = [
     path("upload/<uuid:batch_id>/status/", TimetableUploadStatusAPIView.as_view(), name="timetable-upload-status"),
     path("upload/list/", TimetableUploadListViewSet.as_view({"get": "list"}), name="timetable-upload-list"),
     path("assign-lecturers/", AssignLecturersAPIView.as_view(), name="timetable-assign-lecturers"),
-    path('timetable/metadata/', TimetableMetadataView.as_view(), name='timetable-metadata'),
+    path('metadata/', TimetableMetadataView.as_view(), name='timetable-metadata'),
 ]
