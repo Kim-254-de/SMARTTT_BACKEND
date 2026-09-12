@@ -26,17 +26,20 @@ class TimetableMetadataView(APIView):
         year_of_study = request.query_params.get('year_of_study')
         semester = request.query_params.get('semester', current_term.semester)
 
+        # Base filter for years and groups
         filtered_slots = slots
         if program_id:
             filtered_slots = filtered_slots.filter(program_id=program_id)
-        if year_of_study:
-            filtered_slots = filtered_slots.filter(year_of_study=year_of_study)
 
-        # 2. Absolute Unique Years using Python set
+        # Available years for this course
         raw_years = filtered_slots.values_list('year_of_study', flat=True)
         years = sorted(list(set(y for y in raw_years if y is not None)))
 
-        # 3. Absolute Unique Groups using Python set & stripping whitespace
+        # Further filter by year if provided
+        if year_of_study:
+            filtered_slots = filtered_slots.filter(year_of_study=year_of_study)
+
+        # Scoped unique groups for this specific course + year combination
         raw_groups = filtered_slots.values_list('class_group', flat=True)
         groups = sorted(list(set(g.strip() for g in raw_groups if g and g.strip())))
 
