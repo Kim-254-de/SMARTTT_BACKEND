@@ -1,1 +1,1 @@
-from .student import Student, AcademicProgress, StudentEnrollment
+from .student import Student, StudentEnrollment
