@@ -10,7 +10,7 @@ from django.utils.translation import gettext_lazy as _
 from django.urls import reverse
 from django.db.models import Q
 
-from apps.students.models import Student
+from apps.students.models import Student, AcademicProgress, StudentEnrollment
 
 
 @admin.register(Student)
@@ -178,7 +178,74 @@ class StudentAdmin(admin.ModelAdmin):
     activate_students.short_description = _('Activate selected students')
 
 
+@admin.register(AcademicProgress)
+class AcademicProgressAdmin(admin.ModelAdmin):
+    """Admin interface for AcademicProgress model."""
 
+    list_display = (
+        'get_student',
+        'academic_year',
+        'study_year',
+        'semester',
+        'gpa',
+        'cgpa',
+        'total_credits',
+        'academic_status',
+        'created_at',
+    )
+
+    list_filter = (
+        'academic_status',
+        'academic_year',
+        'semester',
+        'created_at',
+    )
+
+    search_fields = (
+        'student__registration_number',
+        'student__first_name',
+        'student__last_name',
+    )
+
+    readonly_fields = (
+        'id',
+        'created_at',
+        'updated_at',
+    )
+
+    fieldsets = (
+        (_('Student'), {
+            'fields': ('student',),
+        }),
+        (_('Academic Period'), {
+            'fields': (
+                'academic_year',
+                'study_year',
+                'semester',
+            ),
+        }),
+        (_('Academic Metrics'), {
+            'fields': (
+                'gpa',
+                'cgpa',
+                'total_credits',
+                'credits_this_semester',
+            ),
+        }),
+        (_('Status'), {
+            'fields': ('academic_status',),
+        }),
+        (_('Metadata'), {
+            'fields': (
+                'recorded_by',
+                'id',
+                'created_at',
+                'updated_at',
+            ),
+        }),
+    )
+
+    ordering = ['-academic_year', '-semester']
 
     def get_student(self, obj):
         """Display student information."""
@@ -191,7 +258,74 @@ class StudentAdmin(admin.ModelAdmin):
         return qs.select_related('student', 'recorded_by')
 
 
+@admin.register(StudentEnrollment)
+class StudentEnrollmentAdmin(admin.ModelAdmin):
+    """Admin interface for StudentEnrollment model."""
 
+    list_display = (
+        'get_student',
+        'academic_year',
+        'study_year',
+        'semester',
+        'curriculum_link',
+        'enrollment_status',
+        'enrollment_date',
+    )
+
+    list_filter = (
+        'enrollment_status',
+        'academic_year',
+        'semester',
+        'enrollment_date',
+    )
+
+    search_fields = (
+        'student__registration_number',
+        'student__first_name',
+        'student__last_name',
+        'curriculum__program__code',
+    )
+
+    readonly_fields = (
+        'id',
+        'enrollment_date',
+        'created_at',
+        'updated_at',
+    )
+
+    fieldsets = (
+        (_('Student'), {
+            'fields': ('student',),
+        }),
+        (_('Curriculum'), {
+            'fields': ('curriculum',),
+        }),
+        (_('Academic Period'), {
+            'fields': (
+                'academic_year',
+                'study_year',
+                'semester',
+            ),
+        }),
+        (_('Enrollment'), {
+            'fields': (
+                'enrollment_status',
+                'enrollment_date',
+            ),
+        }),
+        (_('Notes'), {
+            'fields': ('notes',),
+        }),
+        (_('Metadata'), {
+            'fields': (
+                'id',
+                'created_at',
+                'updated_at',
+            ),
+        }),
+    )
+
+    ordering = ['-academic_year', '-semester']
 
     def get_student(self, obj):
         """Display student information."""

@@ -39,6 +39,54 @@ class Student(BaseModel):
         GRADUATED = "graduated", _("Graduated")
         WITHDRAWN = "withdrawn", _("Withdrawn")
         ON_LEAVE = "on_leave", _("On Leave")
+        
+class StudentEnrollment(BaseModel):
+    """
+    Tracks student enrollment per term/academic year.
+    """
+    student = models.ForeignKey(
+        "students.Student",
+        on_delete=models.CASCADE,
+        related_name="enrollments",
+    )
+    academic_term = models.ForeignKey(
+        "timetable.AcademicTerm",
+        on_delete=models.CASCADE,
+        related_name="student_enrollments",
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = "student_enrollment"
+        unique_together = ["student", "academic_term"]
+        verbose_name = _("Student Enrollment")
+        verbose_name_plural = _("Student Enrollments")
+
+    def __str__(self) -> str:
+        return f"{self.student} - {self.academic_term}"
+
+
+class AcademicProgress(BaseModel):
+    """
+    Tracks student academic performance and GPA milestones.
+    """
+    student = models.ForeignKey(
+        "students.Student",
+        on_delete=models.CASCADE,
+        related_name="academic_progress",
+    )
+    academic_year = models.CharField(max_length=10)
+    semester = models.PositiveSmallIntegerField()
+    gpa = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True)
+    remarks = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "student_academic_progress"
+        verbose_name = _("Academic Progress")
+        verbose_name_plural = _("Academic Progress Reports")
+
+    def __str__(self) -> str:
+        return f"{self.student} - Year {self.academic_year} Sem {self.semester}"
 
     class EnrollmentType(models.TextChoices):
         FULL_TIME = "full_time", _("Full Time")
