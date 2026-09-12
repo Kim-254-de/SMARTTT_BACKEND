@@ -322,17 +322,24 @@ class StudentEnrollment(BaseModel):
         "timetable.AcademicTerm",
         on_delete=models.CASCADE,
         related_name="student_enrollments",
+        null=True,
+        blank=True,
     )
+    academic_year = models.CharField(max_length=10, default="2024/2025")
+    study_year = models.PositiveSmallIntegerField(default=1)
+    semester = models.PositiveSmallIntegerField(default=1)
+    enrollment_status = models.CharField(max_length=50, default="enrolled")
+    enrollment_date = models.DateTimeField(auto_now_add=True)
     is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = "student_enrollment"
-        unique_together = ["student", "academic_term"]
         verbose_name = _("Student Enrollment")
         verbose_name_plural = _("Student Enrollments")
+        ordering = ["-academic_year", "-semester"]
 
     def __str__(self) -> str:
-        return f"{self.student} - {self.academic_term}"
+        return f"{self.student} - {self.academic_year} Sem {self.semester}"
 
 
 class AcademicProgress(BaseModel):
@@ -344,9 +351,13 @@ class AcademicProgress(BaseModel):
         on_delete=models.CASCADE,
         related_name="academic_progress",
     )
-    academic_year = models.CharField(max_length=10)
-    semester = models.PositiveSmallIntegerField()
+    academic_year = models.CharField(max_length=10, default="2024/2025")
+    study_year = models.PositiveSmallIntegerField(default=1)
+    semester = models.PositiveSmallIntegerField(default=1)
     gpa = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True)
+    cgpa = models.DecimalField(max_digits=3, decimal_places=2, null=True, blank=True)
+    total_credits = models.PositiveIntegerField(default=0)
+    academic_status = models.CharField(max_length=50, default="active")
     remarks = models.TextField(blank=True)
 
     class Meta:
@@ -355,4 +366,4 @@ class AcademicProgress(BaseModel):
         verbose_name_plural = _("Academic Progress Reports")
 
     def __str__(self) -> str:
-        return f"{self.student} - Year {self.academic_year} Sem {self.semester}"
+        return f"{self.student} - Year {self.study_year} Sem {self.semester}"
