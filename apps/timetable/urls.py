@@ -1,6 +1,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from apps.units.views import UnitViewSet
+from apps.timetable.views.metadataview import TimetableMetadataView
 from apps.timetable.views.timetable_viewsets import (
     AcademicTermViewSet,
     TimetableUploadAPIView,
@@ -23,4 +24,5 @@ urlpatterns = [
     path("upload/<uuid:batch_id>/status/", TimetableUploadStatusAPIView.as_view(), name="timetable-upload-status"),
     path("upload/list/", TimetableUploadListViewSet.as_view({"get": "list"}), name="timetable-upload-list"),
     path("assign-lecturers/", AssignLecturersAPIView.as_view(), name="timetable-assign-lecturers"),
+    path('timetable/metadata/', TimetableMetadataView.as_view(), name='timetable-metadata'),
 ]
