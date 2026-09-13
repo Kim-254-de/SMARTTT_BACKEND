@@ -1,0 +1,162 @@
+diff --git a/apps/accounts/views/auth_views.py b/apps/accounts/views/auth_views.py
+index 44a910b..943f769 100644
+--- a/apps/accounts/views/auth_views.py
++++ b/apps/accounts/views/auth_views.py
+@@ -583,11 +583,16 @@ class LecturerProfileView(APIView):
+     permission_classes = [IsAuthenticated]
+ 
+     def get(self, request):
+-        from apps.timetable.models import AcademicTerm, TimetableSlot
+-        from apps.lecturers.models import Lecturer
+-        from apps.departments.models import Department
++        from datetime import datetime as _dt
++
++        import pytz
+         from django.db.models import Q
+ 
++        from apps.departments.models import Department
++        from apps.lecturers.models import Lecturer
++        from apps.timetable.models import AcademicTerm, TimetableSlot
++        from apps.timetable.utils.day_order import day_of_week_sort_case
++
+         user = request.user
+         if user.role not in ["lecturer"]:
+             return Response({"detail": "Not a lecturer account."}, status=403)
+@@ -595,6 +600,7 @@ class LecturerProfileView(APIView):
+         term = AcademicTerm.objects.filter(is_current=True).first()
+         slots_data = []
+         slot_source = "none"
++        lecturer_profile = None
+ 
+         if term:
+             # 1. Ensure a Lecturer profile exists for this user
+@@ -616,14 +622,17 @@ class LecturerProfileView(APIView):
+                 name_query |= Q(lecturer_name_text__icontains=first_name)
+ 
+             # 3. Query slots matching FK or the text name from docx
+-            assigned_slots = TimetableSlot.objects.select_related(
+-                "unit", "program", "room", "term"
+-            ).filter(
+-                Q(term=term) & (Q(lecturer=lecturer_profile) | name_query)
+-            ).order_by("day_of_week", "start_time")
++            assigned_slots = list(
++                TimetableSlot.objects.select_related(
++                    "unit", "program", "room", "term"
++                ).filter(
++                    Q(term=term) & (Q(lecturer=lecturer_profile) | name_query)
++                ).annotate(_day_sort=day_of_week_sort_case())
++                .order_by("_day_sort", "start_time")
++            )
+ 
+             # Automatically associate unlinked slots to this lecturer FK
+-            if assigned_slots.exists():
++            if assigned_slots:
+                 slot_source = "assigned"
+                 seen_signatures = set()
+                 for slot in assigned_slots:
+@@ -650,11 +659,105 @@ class LecturerProfileView(APIView):
+                         "program_name": slot.program.name if slot.program else "",
+                     })
+ 
++        # ── Dashboard payload: units, sessions grouped by day, today's status,
++        #    per-session enrolled-student counts, and home-screen summary stats.
++        #    Additive only — everything above (user/current_term/slots/slot_source)
++        #    is untouched so lecturer.html keeps working unchanged.
++        tz = pytz.timezone("Africa/Nairobi")
++        now_local = _dt.now(tz)
++        today_code = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"][now_local.weekday()]
++        DAY_ORDER = ["MON", "TUE", "WED", "THU", "FRI", "SAT"]
++
++        allocated_units = sorted({s["unit_code"] for s in slots_data if s["unit_code"]})
++
++        # Enrolled-student count per unit for this term (single aggregated query)
++        student_counts_by_unit = {}
++        total_students = 0
++        unit_ids = {s["unit"] for s in slots_data if s["unit"]}
++        if term and unit_ids:
++            from django.db.models import Count as _Count
++
++            from apps.courses.models import StudentUnit
++
++            rows = (
++                StudentUnit.objects.filter(unit_id__in=unit_ids, term=term)
++                .values("unit_id")
++                .annotate(count=_Count("id"))
++            )
++            student_counts_by_unit = {str(r["unit_id"]): r["count"] for r in rows}
++            total_students = (
++                StudentUnit.objects.filter(unit_id__in=unit_ids, term=term)
++                .values("user_id").distinct().count()
++            )
++
++        def _parse_time(hms: str):
++            return _dt.strptime(hms, "%H:%M:%S").time()
++
++        timetable_grouped = {day: [] for day in DAY_ORDER}
++        today_sessions = []
++        completed_today = 0
++        remaining_today = 0
++
++        for s in slots_data:
++            day = s["day"] if s["day"] in timetable_grouped else "MON"
++            start_t = _parse_time(s["start_time"])
++            end_t = _parse_time(s["end_time"])
++            session = {
++                "id": s["id"],
++                "unit_code": s["unit_code"],
++                "unit_name": s["unit_name"],
++                "day": day,
++                "start_time": start_t.strftime("%H:%M"),
++                "end_time": end_t.strftime("%H:%M"),
++                "room": s["room_code"],
++                "program": s["program_name"],
++                "student_count": student_counts_by_unit.get(s["unit"], 0),
++            }
++            timetable_grouped.setdefault(day, []).append(session)
++
++            if day == today_code:
++                now_t = now_local.time()
++                if now_t > end_t:
++                    status_ = "completed"
++                    completed_today += 1
++                elif start_t <= now_t <= end_t:
++                    status_ = "now"
++                    remaining_today += 1
++                else:
++                    status_ = "upcoming"
++                    remaining_today += 1
++                today_sessions.append({**session, "status": status_})
++
++        for day in timetable_grouped:
++            timetable_grouped[day].sort(key=lambda x: x["start_time"])
++        today_sessions.sort(key=lambda x: x["start_time"])
++
++        lecturer_info = None
++        if lecturer_profile:
++            lecturer_info = {
++                "staff_id": user.university_id or "",
++                "department": lecturer_profile.department.name if lecturer_profile.department else "",
++                "rank": lecturer_profile.rank or "",
++            }
++
+         return Response({
+             "user": UserSerializer(user).data,
+             "current_term": str(term) if term else None,
+             "slots": slots_data,
+             "slot_source": slot_source,
++            # ── New fields for the lecturer dashboard UI ──────────────────────
++            "lecturer": lecturer_info,
++            "today": today_code,
++            "allocated_units": allocated_units,
++            "summary": {
++                "units_count": len(allocated_units),
++                "weekly_sessions": len(slots_data),
++                "total_students": total_students,
++                "completed_today": completed_today,
++                "remaining_today": remaining_today,
++            },
++            "timetable": timetable_grouped,
++            "today_sessions": today_sessions,
+         })
+ 
+ 
