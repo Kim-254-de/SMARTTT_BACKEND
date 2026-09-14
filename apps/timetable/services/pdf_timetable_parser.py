@@ -140,7 +140,10 @@ def _extract_day_col_map(header_row: list) -> dict[int, str]:
 
 
 def _approx_time_for_col(col_idx: int) -> tuple[str, str]:
-    step = (col_idx % 12)
+    # Subtract 1 to account for the cohort/label column at index 0,
+    # aligning column indices correctly with 7:00 AM start time slots.
+    adjusted_col = max(0, col_idx - 1)
+    step = (adjusted_col % 12)
     start_h = 7 + step
     end_h = min(start_h + 2, 19)
     return f"{start_h:02d}:00", f"{end_h:02d}:00"
