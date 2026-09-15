@@ -8,6 +8,7 @@ from .permissions import (
     CanManageTimeSlots,
     IsLecturerOrAdmin,
     IsStudentOrAdmin,
+    CanRescheduleTimetableSlot,
 )
 
 # Backward compatibility: older modules refer to "own timetable" permission.
@@ -24,4 +25,5 @@ __all__ = [
     "CanManageTimeSlots",
     "IsLecturerOrAdmin",
     "IsStudentOrAdmin",
+    "CanRescheduleTimetableSlot",
 ]

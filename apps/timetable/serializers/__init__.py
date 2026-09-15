@@ -4,6 +4,7 @@ from .timetable_serializer import (
     ConflictDetailSerializer,
     TimetableSlotSerializer,
     TimetableSlotDetailedSerializer,
+    TimetableSlotRescheduleSerializer,
     TimetableUploadBatchSerializer,
     TimetableUploadBatchDetailedSerializer,
     UploadResponseSerializer,
@@ -31,6 +32,7 @@ __all__ = [
     "TimetableUploadBatchDetailedSerializer",
     "TimetableSlotSerializer",
     "TimetableSlotDetailedSerializer",
+    "TimetableSlotRescheduleSerializer",
     "TimetableConflictSerializer",
     "ConflictDetailSerializer",
     # Room serializers

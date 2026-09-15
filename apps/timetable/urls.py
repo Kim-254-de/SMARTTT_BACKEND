@@ -4,6 +4,7 @@ from apps.units.views import UnitViewSet
 from apps.timetable.views.metadataview import TimetableMetadataView
 from apps.timetable.views.timetable_viewsets import (
     AcademicTermViewSet,
+    TimetableSlotViewSet,
     TimetableUploadAPIView,
     TimetableUploadStatusAPIView,
     TimetableUploadListViewSet,
@@ -17,6 +18,7 @@ router.register("units", UnitViewSet, basename="unit")
 router.register("rooms", RoomViewSet, basename="room")
 router.register("time-slots", TimeSlotViewSet, basename="time-slot")
 router.register("sessions", TimetableSessionViewSet, basename="session")
+router.register("slots", TimetableSlotViewSet, basename="slot")
 
 urlpatterns = [
     path("", include(router.urls)),

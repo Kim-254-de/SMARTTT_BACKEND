@@ -21,12 +21,12 @@ from apps.timetable.models import AcademicTerm, TimetableSlot
 
 
 DAY_INDEX = {
-    TimetableSlot.Day.MON: 0,
-    TimetableSlot.Day.TUE: 1,
-    TimetableSlot.Day.WED: 2,
-    TimetableSlot.Day.THU: 3,
-    TimetableSlot.Day.FRI: 4,
-    TimetableSlot.Day.SAT: 5,
+    TimetableSlot.WeekDay.MONDAY: 0,
+    TimetableSlot.WeekDay.TUESDAY: 1,
+    TimetableSlot.WeekDay.WEDNESDAY: 2,
+    TimetableSlot.WeekDay.THURSDAY: 3,
+    TimetableSlot.WeekDay.FRIDAY: 4,
+    TimetableSlot.WeekDay.SATURDAY: 5,
 }
 
 
@@ -62,10 +62,10 @@ class Command(BaseCommand):
         latest = now + timedelta(minutes=minutes_before + 2)
         slots = TimetableSlot.objects.select_related("unit", "room").filter(
             term=term,
-            day__in=DAY_INDEX,
+            day_of_week__in=DAY_INDEX,
         )
         for slot in slots:
-            target_weekday = DAY_INDEX[slot.day]
+            target_weekday = DAY_INDEX[slot.day_of_week]
             days_ahead = (target_weekday - now.weekday()) % 7
             occurrence_date = now.date() + timedelta(days=days_ahead)
             if occurrence_date < term.start_date or occurrence_date > term.end_date:

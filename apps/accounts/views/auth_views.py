@@ -567,11 +567,16 @@ class StaffIDListView(APIView):
 class LecturerProfileView(APIView):
     permission_classes = [IsAuthenticated]
 
+    DAY_ORDER = ["MON", "TUE", "WED", "THU", "FRI", "SAT"]
+
     def get(self, request):
-        from apps.timetable.models import AcademicTerm, TimetableSlot
-        from apps.lecturers.models import Lecturer
-        from apps.departments.models import Department
         from django.db.models import Q
+        from django.utils import timezone
+
+        from apps.courses.models import StudentUnit
+        from apps.departments.models import Department
+        from apps.lecturers.models import Lecturer
+        from apps.timetable.models import AcademicTerm, TimetableSlot
 
         user = request.user
         if user.role not in ["lecturer"]:
@@ -580,6 +585,18 @@ class LecturerProfileView(APIView):
         term = AcademicTerm.objects.filter(is_current=True).first()
         slots_data = []
         slot_source = "none"
+
+        now = timezone.localtime()
+        # Sunday (weekday() == 6) has no teaching day in DAY_ORDER — fall back
+        # to Monday for display; today_sessions will simply be empty.
+        today_code = self.DAY_ORDER[now.weekday()] if now.weekday() < 6 else "MON"
+
+        lecturer_profile = None
+        units_by_id: dict[str, dict] = {}
+        timetable: dict[str, list] = {day: [] for day in self.DAY_ORDER}
+        today_sessions = []
+        weekly_sessions = 0
+        unit_ids_taught: set = set()
 
         if term:
             lecturer_profile, _ = Lecturer.objects.get_or_create(
@@ -607,6 +624,9 @@ class LecturerProfileView(APIView):
             if assigned_slots.exists():
                 slot_source = "assigned"
                 seen_signatures = set()
+                # unit_id -> distinct StudentUnit count this term, computed once per unit
+                student_count_by_unit: dict = {}
+
                 for slot in assigned_slots:
                     if slot.lecturer_id != lecturer_profile.id:
                         slot.lecturer = lecturer_profile
@@ -617,21 +637,96 @@ class LecturerProfileView(APIView):
                         continue
                     seen_signatures.add(sig)
 
+                    unit_id = str(slot.unit_id) if slot.unit_id else ""
+                    unit_code = slot.unit.code if slot.unit else ""
+                    unit_name = slot.unit.name if slot.unit else ""
+                    day_key = (slot.day_of_week or "MON").upper()
+                    start_str = slot.start_time.strftime("%H:%M") if slot.start_time else ""
+                    end_str = slot.end_time.strftime("%H:%M") if slot.end_time else ""
+
+                    # Legacy shape — still consumed by web/lecturer.html
                     slots_data.append({
                         "id": str(slot.id),
-                        "unit": str(slot.unit_id),
-                        "unit_code": slot.unit.code if slot.unit else "",
-                        "unit_name": slot.unit.name if slot.unit else "",
-                        "day": (slot.day_of_week or "MON").upper(),
+                        "unit": unit_id,
+                        "unit_code": unit_code,
+                        "unit_name": unit_name,
+                        "day": day_key,
                         "start_time": slot.start_time.strftime("%H:%M:%S") if slot.start_time else "08:00:00",
                         "end_time": slot.end_time.strftime("%H:%M:%S") if slot.end_time else "10:00:00",
                         "room_code": slot.room.code if slot.room else "TBA",
                         "program_name": slot.program.name if slot.program else "",
                     })
 
+                    if unit_id:
+                        unit_ids_taught.add(slot.unit_id)
+                        units_by_id.setdefault(unit_id, {"id": unit_id, "code": unit_code, "name": unit_name})
+
+                        if slot.unit_id not in student_count_by_unit:
+                            student_count_by_unit[slot.unit_id] = StudentUnit.objects.filter(
+                                unit_id=slot.unit_id, term=term
+                            ).count()
+                    student_count = student_count_by_unit.get(slot.unit_id, 0)
+
+                    session = {
+                        "id": str(slot.id),
+                        "unit_id": unit_id,
+                        "unit_code": unit_code,
+                        "unit_name": unit_name,
+                        "day": day_key,
+                        "start_time": start_str,
+                        "end_time": end_str,
+                        "room": slot.room.code if slot.room else "TBA",
+                        "program": slot.program.name if slot.program else "",
+                        "student_count": student_count,
+                    }
+
+                    weekly_sessions += 1
+                    if day_key in timetable:
+                        timetable[day_key].append(session)
+
+                    if day_key == today_code and slot.start_time and slot.end_time:
+                        current_time = now.time()
+                        if current_time > slot.end_time:
+                            status = "completed"
+                        elif slot.start_time <= current_time <= slot.end_time:
+                            status = "now"
+                        else:
+                            status = "upcoming"
+                        today_sessions.append({**session, "status": status})
+
+        for day in timetable:
+            timetable[day].sort(key=lambda s: s["start_time"])
+        today_sessions.sort(key=lambda s: s["start_time"])
+
+        total_students = (
+            StudentUnit.objects.filter(unit_id__in=unit_ids_taught, term=term)
+            .values("user_id").distinct().count()
+            if unit_ids_taught and term else 0
+        )
+        completed_today = sum(1 for s in today_sessions if s["status"] == "completed")
+        remaining_today = len(today_sessions) - completed_today
+
         return Response({
             "user": UserSerializer(user).data,
+            "lecturer": {
+                "staff_id": user.university_id or "",
+                "department": lecturer_profile.department.name if lecturer_profile and lecturer_profile.department else "",
+                "rank": lecturer_profile.rank if lecturer_profile else "",
+            },
             "current_term": str(term) if term else None,
+            "today": today_code,
+            "allocated_units": sorted({u["code"] for u in units_by_id.values() if u["code"]}),
+            "units": list(units_by_id.values()),
+            "summary": {
+                "units_count": len(units_by_id),
+                "weekly_sessions": weekly_sessions,
+                "total_students": total_students,
+                "completed_today": completed_today,
+                "remaining_today": remaining_today,
+            },
+            "timetable": timetable,
+            "today_sessions": today_sessions,
+            # Legacy fields — kept so web/lecturer.html keeps working unchanged.
             "slots": slots_data,
             "slot_source": slot_source,
         })

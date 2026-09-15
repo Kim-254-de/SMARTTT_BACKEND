@@ -168,3 +168,45 @@ class IsStudentOrAdmin(BasePermission):
             or is_super_admin(request.user)
             or is_registrar(request.user)
         )
+
+
+class CanRescheduleTimetableSlot(BasePermission):
+    """
+    Who may call the TimetableSlot `reschedule` action:
+    - Super admin / registrar: any slot
+    - Department admin: slots for programs in their own department
+    - Lecturer: ONLY slots where they are the assigned lecturer on that slot
+
+    This is intentionally narrower than CanManageTimetable — it does not
+    grant create/delete, just the ability to move a class you teach (or
+    manage) to a new day/time/room.
+    """
+
+    message = _("You don't have permission to reschedule this class")
+
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        return (
+            is_super_admin(request.user)
+            or is_registrar(request.user)
+            or is_department_admin(request.user)
+            or is_lecturer(request.user)
+        )
+
+    def has_object_permission(self, request, view, obj):
+        if is_super_admin(request.user) or is_registrar(request.user):
+            return True
+
+        if is_department_admin(request.user):
+            user_dept_id = getattr(request.user, "department_id", None)
+            slot_dept_id = getattr(obj.program, "department_id", None) if obj.program else None
+            if slot_dept_id is None and obj.lecturer:
+                slot_dept_id = obj.lecturer.department_id
+            return user_dept_id is not None and slot_dept_id == user_dept_id
+
+        if is_lecturer(request.user):
+            lecturer_profile = getattr(request.user, "lecturer_profile", None)
+            return bool(lecturer_profile) and obj.lecturer_id == lecturer_profile.id
+
+        return False

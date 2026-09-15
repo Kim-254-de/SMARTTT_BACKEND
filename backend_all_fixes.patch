@@ -1,0 +1,571 @@
+diff --git a/apps/accounts/views/auth_views.py b/apps/accounts/views/auth_views.py
+index e53303b..4a13e33 100644
+--- a/apps/accounts/views/auth_views.py
++++ b/apps/accounts/views/auth_views.py
+@@ -567,11 +567,16 @@ class StaffIDListView(APIView):
+ class LecturerProfileView(APIView):
+     permission_classes = [IsAuthenticated]
+ 
++    DAY_ORDER = ["MON", "TUE", "WED", "THU", "FRI", "SAT"]
++
+     def get(self, request):
+-        from apps.timetable.models import AcademicTerm, TimetableSlot
+-        from apps.lecturers.models import Lecturer
+-        from apps.departments.models import Department
+         from django.db.models import Q
++        from django.utils import timezone
++
++        from apps.courses.models import StudentUnit
++        from apps.departments.models import Department
++        from apps.lecturers.models import Lecturer
++        from apps.timetable.models import AcademicTerm, TimetableSlot
+ 
+         user = request.user
+         if user.role not in ["lecturer"]:
+@@ -581,6 +586,18 @@ class LecturerProfileView(APIView):
+         slots_data = []
+         slot_source = "none"
+ 
++        now = timezone.localtime()
++        # Sunday (weekday() == 6) has no teaching day in DAY_ORDER — fall back
++        # to Monday for display; today_sessions will simply be empty.
++        today_code = self.DAY_ORDER[now.weekday()] if now.weekday() < 6 else "MON"
++
++        lecturer_profile = None
++        units_by_id: dict[str, dict] = {}
++        timetable: dict[str, list] = {day: [] for day in self.DAY_ORDER}
++        today_sessions = []
++        weekly_sessions = 0
++        unit_ids_taught: set = set()
++
+         if term:
+             lecturer_profile, _ = Lecturer.objects.get_or_create(
+                 user=user,
+@@ -607,6 +624,9 @@ class LecturerProfileView(APIView):
+             if assigned_slots.exists():
+                 slot_source = "assigned"
+                 seen_signatures = set()
++                # unit_id -> distinct StudentUnit count this term, computed once per unit
++                student_count_by_unit: dict = {}
++
+                 for slot in assigned_slots:
+                     if slot.lecturer_id != lecturer_profile.id:
+                         slot.lecturer = lecturer_profile
+@@ -617,21 +637,96 @@ class LecturerProfileView(APIView):
+                         continue
+                     seen_signatures.add(sig)
+ 
++                    unit_id = str(slot.unit_id) if slot.unit_id else ""
++                    unit_code = slot.unit.code if slot.unit else ""
++                    unit_name = slot.unit.name if slot.unit else ""
++                    day_key = (slot.day_of_week or "MON").upper()
++                    start_str = slot.start_time.strftime("%H:%M") if slot.start_time else ""
++                    end_str = slot.end_time.strftime("%H:%M") if slot.end_time else ""
++
++                    # Legacy shape — still consumed by web/lecturer.html
+                     slots_data.append({
+                         "id": str(slot.id),
+-                        "unit": str(slot.unit_id),
+-                        "unit_code": slot.unit.code if slot.unit else "",
+-                        "unit_name": slot.unit.name if slot.unit else "",
+-                        "day": (slot.day_of_week or "MON").upper(),
++                        "unit": unit_id,
++                        "unit_code": unit_code,
++                        "unit_name": unit_name,
++                        "day": day_key,
+                         "start_time": slot.start_time.strftime("%H:%M:%S") if slot.start_time else "08:00:00",
+                         "end_time": slot.end_time.strftime("%H:%M:%S") if slot.end_time else "10:00:00",
+                         "room_code": slot.room.code if slot.room else "TBA",
+                         "program_name": slot.program.name if slot.program else "",
+                     })
+ 
++                    if unit_id:
++                        unit_ids_taught.add(slot.unit_id)
++                        units_by_id.setdefault(unit_id, {"id": unit_id, "code": unit_code, "name": unit_name})
++
++                        if slot.unit_id not in student_count_by_unit:
++                            student_count_by_unit[slot.unit_id] = StudentUnit.objects.filter(
++                                unit_id=slot.unit_id, term=term
++                            ).count()
++                    student_count = student_count_by_unit.get(slot.unit_id, 0)
++
++                    session = {
++                        "id": str(slot.id),
++                        "unit_id": unit_id,
++                        "unit_code": unit_code,
++                        "unit_name": unit_name,
++                        "day": day_key,
++                        "start_time": start_str,
++                        "end_time": end_str,
++                        "room": slot.room.code if slot.room else "TBA",
++                        "program": slot.program.name if slot.program else "",
++                        "student_count": student_count,
++                    }
++
++                    weekly_sessions += 1
++                    if day_key in timetable:
++                        timetable[day_key].append(session)
++
++                    if day_key == today_code and slot.start_time and slot.end_time:
++                        current_time = now.time()
++                        if current_time > slot.end_time:
++                            status = "completed"
++                        elif slot.start_time <= current_time <= slot.end_time:
++                            status = "now"
++                        else:
++                            status = "upcoming"
++                        today_sessions.append({**session, "status": status})
++
++        for day in timetable:
++            timetable[day].sort(key=lambda s: s["start_time"])
++        today_sessions.sort(key=lambda s: s["start_time"])
++
++        total_students = (
++            StudentUnit.objects.filter(unit_id__in=unit_ids_taught, term=term)
++            .values("user_id").distinct().count()
++            if unit_ids_taught and term else 0
++        )
++        completed_today = sum(1 for s in today_sessions if s["status"] == "completed")
++        remaining_today = len(today_sessions) - completed_today
++
+         return Response({
+             "user": UserSerializer(user).data,
++            "lecturer": {
++                "staff_id": user.university_id or "",
++                "department": lecturer_profile.department.name if lecturer_profile and lecturer_profile.department else "",
++                "rank": lecturer_profile.rank if lecturer_profile else "",
++            },
+             "current_term": str(term) if term else None,
++            "today": today_code,
++            "allocated_units": sorted({u["code"] for u in units_by_id.values() if u["code"]}),
++            "units": list(units_by_id.values()),
++            "summary": {
++                "units_count": len(units_by_id),
++                "weekly_sessions": weekly_sessions,
++                "total_students": total_students,
++                "completed_today": completed_today,
++                "remaining_today": remaining_today,
++            },
++            "timetable": timetable,
++            "today_sessions": today_sessions,
++            # Legacy fields — kept so web/lecturer.html keeps working unchanged.
+             "slots": slots_data,
+             "slot_source": slot_source,
+         })
+diff --git a/apps/notifications/management/commands/send_class_reminders.py b/apps/notifications/management/commands/send_class_reminders.py
+index 41208e0..ea90295 100644
+--- a/apps/notifications/management/commands/send_class_reminders.py
++++ b/apps/notifications/management/commands/send_class_reminders.py
+@@ -21,12 +21,12 @@ from apps.timetable.models import AcademicTerm, TimetableSlot
+ 
+ 
+ DAY_INDEX = {
+-    TimetableSlot.Day.MON: 0,
+-    TimetableSlot.Day.TUE: 1,
+-    TimetableSlot.Day.WED: 2,
+-    TimetableSlot.Day.THU: 3,
+-    TimetableSlot.Day.FRI: 4,
+-    TimetableSlot.Day.SAT: 5,
++    TimetableSlot.WeekDay.MONDAY: 0,
++    TimetableSlot.WeekDay.TUESDAY: 1,
++    TimetableSlot.WeekDay.WEDNESDAY: 2,
++    TimetableSlot.WeekDay.THURSDAY: 3,
++    TimetableSlot.WeekDay.FRIDAY: 4,
++    TimetableSlot.WeekDay.SATURDAY: 5,
+ }
+ 
+ 
+@@ -62,10 +62,10 @@ class Command(BaseCommand):
+         latest = now + timedelta(minutes=minutes_before + 2)
+         slots = TimetableSlot.objects.select_related("unit", "room").filter(
+             term=term,
+-            day__in=DAY_INDEX,
++            day_of_week__in=DAY_INDEX,
+         )
+         for slot in slots:
+-            target_weekday = DAY_INDEX[slot.day]
++            target_weekday = DAY_INDEX[slot.day_of_week]
+             days_ahead = (target_weekday - now.weekday()) % 7
+             occurrence_date = now.date() + timedelta(days=days_ahead)
+             if occurrence_date < term.start_date or occurrence_date > term.end_date:
+diff --git a/apps/timetable/permissions/__init__.py b/apps/timetable/permissions/__init__.py
+index 07fc759..837214c 100644
+--- a/apps/timetable/permissions/__init__.py
++++ b/apps/timetable/permissions/__init__.py
+@@ -8,6 +8,7 @@ from .permissions import (
+     CanManageTimeSlots,
+     IsLecturerOrAdmin,
+     IsStudentOrAdmin,
++    CanRescheduleTimetableSlot,
+ )
+ 
+ # Backward compatibility: older modules refer to "own timetable" permission.
+@@ -24,4 +25,5 @@ __all__ = [
+     "CanManageTimeSlots",
+     "IsLecturerOrAdmin",
+     "IsStudentOrAdmin",
++    "CanRescheduleTimetableSlot",
+ ]
+diff --git a/apps/timetable/permissions/permissions.py b/apps/timetable/permissions/permissions.py
+index 64cfe51..a89512e 100644
+--- a/apps/timetable/permissions/permissions.py
++++ b/apps/timetable/permissions/permissions.py
+@@ -168,3 +168,45 @@ class IsStudentOrAdmin(BasePermission):
+             or is_super_admin(request.user)
+             or is_registrar(request.user)
+         )
++
++
++class CanRescheduleTimetableSlot(BasePermission):
++    """
++    Who may call the TimetableSlot `reschedule` action:
++    - Super admin / registrar: any slot
++    - Department admin: slots for programs in their own department
++    - Lecturer: ONLY slots where they are the assigned lecturer on that slot
++
++    This is intentionally narrower than CanManageTimetable — it does not
++    grant create/delete, just the ability to move a class you teach (or
++    manage) to a new day/time/room.
++    """
++
++    message = _("You don't have permission to reschedule this class")
++
++    def has_permission(self, request, view):
++        if not request.user or not request.user.is_authenticated:
++            return False
++        return (
++            is_super_admin(request.user)
++            or is_registrar(request.user)
++            or is_department_admin(request.user)
++            or is_lecturer(request.user)
++        )
++
++    def has_object_permission(self, request, view, obj):
++        if is_super_admin(request.user) or is_registrar(request.user):
++            return True
++
++        if is_department_admin(request.user):
++            user_dept_id = getattr(request.user, "department_id", None)
++            slot_dept_id = getattr(obj.program, "department_id", None) if obj.program else None
++            if slot_dept_id is None and obj.lecturer:
++                slot_dept_id = obj.lecturer.department_id
++            return user_dept_id is not None and slot_dept_id == user_dept_id
++
++        if is_lecturer(request.user):
++            lecturer_profile = getattr(request.user, "lecturer_profile", None)
++            return bool(lecturer_profile) and obj.lecturer_id == lecturer_profile.id
++
++        return False
+diff --git a/apps/timetable/serializers/__init__.py b/apps/timetable/serializers/__init__.py
+index c6492dc..f9e2dbd 100644
+--- a/apps/timetable/serializers/__init__.py
++++ b/apps/timetable/serializers/__init__.py
+@@ -4,6 +4,7 @@ from .timetable_serializer import (
+     ConflictDetailSerializer,
+     TimetableSlotSerializer,
+     TimetableSlotDetailedSerializer,
++    TimetableSlotRescheduleSerializer,
+     TimetableUploadBatchSerializer,
+     TimetableUploadBatchDetailedSerializer,
+     UploadResponseSerializer,
+@@ -31,6 +32,7 @@ __all__ = [
+     "TimetableUploadBatchDetailedSerializer",
+     "TimetableSlotSerializer",
+     "TimetableSlotDetailedSerializer",
++    "TimetableSlotRescheduleSerializer",
+     "TimetableConflictSerializer",
+     "ConflictDetailSerializer",
+     # Room serializers
+diff --git a/apps/timetable/serializers/timetable_serializer.py b/apps/timetable/serializers/timetable_serializer.py
+index 4a0db35..86694fc 100644
+--- a/apps/timetable/serializers/timetable_serializer.py
++++ b/apps/timetable/serializers/timetable_serializer.py
+@@ -186,6 +186,35 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
+         return self.get_instructor(obj)
+ 
+ 
++class TimetableSlotRescheduleSerializer(serializers.Serializer):
++    """
++    Deliberately narrow: only the fields a reschedule is allowed to touch.
++    Unlike TimetableSlotSerializer, this can never be used to change the
++    unit, program, lecturer, or class_group on a slot.
++    """
++    day_of_week = serializers.ChoiceField(choices=TimetableSlot.WeekDay.choices, required=False)
++    start_time = serializers.TimeField(required=False)
++    end_time = serializers.TimeField(required=False)
++    room = serializers.PrimaryKeyRelatedField(
++        queryset=TimetableSlot._meta.get_field("room").related_model.objects.all(),
++        required=False,
++    )
++    reason = serializers.CharField(required=False, allow_blank=True, max_length=500)
++
++    def validate(self, data):
++        if not any(k in data for k in ("day_of_week", "start_time", "end_time", "room")):
++            raise serializers.ValidationError(
++                "Provide at least one of day_of_week, start_time, end_time, room."
++            )
++
++        instance = self.instance
++        start_time = data.get("start_time", instance.start_time if instance else None)
++        end_time = data.get("end_time", instance.end_time if instance else None)
++        if start_time and end_time and start_time >= end_time:
++            raise serializers.ValidationError({"end_time": "Must be after start_time."})
++        return data
++
++
+ class ConflictDetailSerializer(serializers.ModelSerializer):
+     """Serializer for conflict details with slot information."""
+     
+diff --git a/apps/timetable/services/reschedule_notifications.py b/apps/timetable/services/reschedule_notifications.py
+new file mode 100644
+index 0000000..690bc5e
+--- /dev/null
++++ b/apps/timetable/services/reschedule_notifications.py
+@@ -0,0 +1,112 @@
++"""
++Notifies students when a TimetableSlot they're enrolled in is rescheduled.
++
++Reuses the same Notification / StudentNotification / FCM pathway that
++apps.notifications.views already uses for admin/lecturer announcements,
++so rescheduled classes show up in the student's Alerts screen and as a
++push notification, in addition to the schedule itself updating live.
++"""
++from __future__ import annotations
++
++from apps.accounts.models import User
++from apps.courses.models import StudentUnit
++from apps.notifications.fcm_service import send_to_tokens
++from apps.notifications.models import (
++    FCMToken,
++    Notification,
++    NotificationType,
++    StudentNotification,
++    Target,
++)
++
++
++def _describe_change(old_day, old_start, old_end, old_room, slot) -> tuple[str, str]:
++    """Build a (title, message) pair describing what changed."""
++    day_changed = old_day != slot.day_of_week
++    time_changed = old_start != slot.start_time or old_end != slot.end_time
++    old_room_id = getattr(old_room, "id", old_room)
++    new_room_id = getattr(slot.room, "id", slot.room)
++    room_changed = old_room_id != new_room_id
++
++    unit_code = slot.unit.code if slot.unit else "Class"
++    old_day_display = dict(slot.WeekDay.choices).get(old_day, old_day)
++    new_day_display = slot.get_day_of_week_display()
++
++    if room_changed and not (day_changed or time_changed):
++        title = f"{unit_code}: venue changed"
++        message = (
++            f"{unit_code} has moved from {old_room.code if old_room else 'TBA'} "
++            f"to {slot.room.code if slot.room else 'TBA'}, still {new_day_display} "
++            f"{slot.start_time:%H:%M}-{slot.end_time:%H:%M}."
++        )
++        notif_type = NotificationType.VENUE_CHANGE
++    else:
++        title = f"{unit_code}: class rescheduled"
++        message = (
++            f"{unit_code} has been moved from {old_day_display} "
++            f"{old_start:%H:%M}-{old_end:%H:%M} to {new_day_display} "
++            f"{slot.start_time:%H:%M}-{slot.end_time:%H:%M}"
++            f", room {slot.room.code if slot.room else 'TBA'}."
++        )
++        notif_type = NotificationType.TIMETABLE_CHANGE
++
++    return title, message, notif_type
++
++
++def notify_students_of_reschedule(
++    slot,
++    *,
++    old_day,
++    old_start,
++    old_end,
++    old_room,
++    reason: str = "",
++    sent_by=None,
++) -> dict:
++    """
++    Sends a TIMETABLE_CHANGE / VENUE_CHANGE notification to every student
++    enrolled in `slot.unit` for `slot.term`, and pushes to their devices.
++
++    Returns a small summary dict — never raises on notification failure,
++    since a failed notification should not roll back the reschedule itself.
++    """
++    if slot.unit_id is None or slot.term_id is None:
++        return {"recipients": 0, "push_sent": 0, "push_attempted": 0}
++
++    title, message, notif_type = _describe_change(old_day, old_start, old_end, old_room, slot)
++    if reason:
++        message = f"{message} Reason: {reason}"
++
++    student_ids = StudentUnit.objects.filter(
++        unit_id=slot.unit_id, term_id=slot.term_id
++    ).values_list("user_id", flat=True)
++    users = list(User.objects.filter(id__in=student_ids, is_active=True))
++
++    if not users:
++        return {"recipients": 0, "push_sent": 0, "push_attempted": 0}
++
++    notification = Notification.objects.create(
++        sent_by=sent_by,
++        title=title,
++        message=message,
++        notification_type=notif_type,
++        target=Target.ALL,
++        recipients_count=len(users),
++        new_venue=slot.room if notif_type == NotificationType.VENUE_CHANGE else None,
++    )
++
++    StudentNotification.objects.bulk_create(
++        [StudentNotification(user=user, notification=notification) for user in users],
++        ignore_conflicts=True,
++    )
++
++    user_ids = [u.id for u in users]
++    tokens = list(FCMToken.objects.filter(user_id__in=user_ids).values_list("token", flat=True))
++    push_sent = send_to_tokens(tokens, title, message, data={"type": notif_type}) if tokens else 0
++
++    return {
++        "notification_id": str(notification.id),
++        "recipients": len(users),
++        "push_attempted": len(tokens),
++        "push_sent": push_sent,
++    }
+diff --git a/apps/timetable/urls.py b/apps/timetable/urls.py
+index 8ca6e08..380c7fb 100644
+--- a/apps/timetable/urls.py
++++ b/apps/timetable/urls.py
+@@ -4,6 +4,7 @@ from apps.units.views import UnitViewSet
+ from apps.timetable.views.metadataview import TimetableMetadataView
+ from apps.timetable.views.timetable_viewsets import (
+     AcademicTermViewSet,
++    TimetableSlotViewSet,
+     TimetableUploadAPIView,
+     TimetableUploadStatusAPIView,
+     TimetableUploadListViewSet,
+@@ -17,6 +18,7 @@ router.register("units", UnitViewSet, basename="unit")
+ router.register("rooms", RoomViewSet, basename="room")
+ router.register("time-slots", TimeSlotViewSet, basename="time-slot")
+ router.register("sessions", TimetableSessionViewSet, basename="session")
++router.register("slots", TimetableSlotViewSet, basename="slot")
+ 
+ urlpatterns = [
+     path("", include(router.urls)),
+diff --git a/apps/timetable/views/timetable_viewsets.py b/apps/timetable/views/timetable_viewsets.py
+index 5ed7513..0a00fc9 100644
+--- a/apps/timetable/views/timetable_viewsets.py
++++ b/apps/timetable/views/timetable_viewsets.py
+@@ -23,11 +23,13 @@ from apps.timetable.serializers import (
+     ConflictDetailSerializer,
+     TimetableSlotSerializer,
+     TimetableSlotDetailedSerializer,
++    TimetableSlotRescheduleSerializer,
+     TimetableUploadBatchSerializer,
+     TimetableUploadBatchDetailedSerializer,
+ )
+-from apps.timetable.permissions import CanManageTimetable
++from apps.timetable.permissions import CanManageTimetable, CanRescheduleTimetableSlot
+ from apps.timetable.services.background_worker import dispatch_async_upload
++from apps.timetable.services.reschedule_notifications import notify_students_of_reschedule
+ from apps.timetable.validators import ExcelFileValidator
+ from apps.timetable.utils import TimetableResponseFormatter
+ 
+@@ -72,14 +74,95 @@ class TimetableSlotViewSet(ModelViewSet):
+     def get_serializer_class(self):
+         if self.action == "detailed":
+             return TimetableSlotDetailedSerializer
++        if self.action == "reschedule":
++            return TimetableSlotRescheduleSerializer
+         return TimetableSlotSerializer
+ 
++    def get_permissions(self):
++        # `reschedule` is deliberately open to the owning lecturer, unlike
++        # every other action on this viewset which stays admin-only
++        # (create/update/delete a slot's unit, program, lecturer, etc.).
++        if self.action == "reschedule":
++            return [CanRescheduleTimetableSlot()]
++        return super().get_permissions()
++
+     @action(detail=True, methods=["get"])
+     def detailed(self, request, pk=None):
+         slot = self.get_object()
+         serializer = TimetableSlotDetailedSerializer(slot)
+         return Response(serializer.data)
+ 
++    @action(detail=True, methods=["post"])
++    def reschedule(self, request, pk=None):
++        """
++        POST /api/v1/timetable/slots/{id}/reschedule/
++        Body: { "day_of_week"?, "start_time"?, "end_time"?, "room"?, "reason"? }
++
++        Moves a class to a new day/time/room. Callable by admins/registrar/
++        department admins for any slot, or by a lecturer for a slot they
++        teach. Rejects the change if it collides with another class already
++        booked in that room at the new day/time, and — on success — notifies
++        every student enrolled in the unit this term.
++        """
++        slot = self.get_object()  # runs CanRescheduleTimetableSlot.has_object_permission
++
++        serializer = TimetableSlotRescheduleSerializer(instance=slot, data=request.data, partial=True)
++        serializer.is_valid(raise_exception=True)
++        data = serializer.validated_data
++
++        new_day = data.get("day_of_week", slot.day_of_week)
++        new_start = data.get("start_time", slot.start_time)
++        new_end = data.get("end_time", slot.end_time)
++        new_room = data.get("room", slot.room)
++        reason = data.get("reason", "")
++
++        conflict = (
++            TimetableSlot.objects.filter(term=slot.term_id, day_of_week=new_day, room=new_room)
++            .exclude(pk=slot.pk)
++            .filter(start_time__lt=new_end, end_time__gt=new_start)
++            .select_related("unit")
++            .first()
++        )
++        if conflict:
++            return Response(
++                {
++                    "detail": (
++                        f"{new_room.code} is already booked on "
++                        f"{conflict.get_day_of_week_display()} "
++                        f"{conflict.start_time:%H:%M}-{conflict.end_time:%H:%M} "
++                        f"for {conflict.unit.code if conflict.unit else 'another class'}."
++                    )
++                },
++                status=status.HTTP_409_CONFLICT,
++            )
++
++        old_day, old_start, old_end, old_room = (
++            slot.day_of_week, slot.start_time, slot.end_time, slot.room,
++        )
++
++        slot.day_of_week = new_day
++        slot.start_time = new_start
++        slot.end_time = new_end
++        slot.room = new_room
++        slot.save(update_fields=["day_of_week", "start_time", "end_time", "room", "updated_at"])
++
++        notify_result = notify_students_of_reschedule(
++            slot,
++            old_day=old_day,
++            old_start=old_start,
++            old_end=old_end,
++            old_room=old_room,
++            reason=reason,
++            sent_by=request.user,
++        )
++
++        return Response(
++            {
++                "slot": TimetableSlotDetailedSerializer(slot).data,
++                "notified": notify_result,
++            }
++        )
++
+ 
+ class TimetableConflictViewSet(ReadOnlyModelViewSet):
+     permission_classes = [CanManageTimetable]

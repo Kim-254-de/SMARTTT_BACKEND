@@ -23,11 +23,13 @@ from apps.timetable.serializers import (
     ConflictDetailSerializer,
     TimetableSlotSerializer,
     TimetableSlotDetailedSerializer,
+    TimetableSlotRescheduleSerializer,
     TimetableUploadBatchSerializer,
     TimetableUploadBatchDetailedSerializer,
 )
-from apps.timetable.permissions import CanManageTimetable
+from apps.timetable.permissions import CanManageTimetable, CanRescheduleTimetableSlot
 from apps.timetable.services.background_worker import dispatch_async_upload
+from apps.timetable.services.reschedule_notifications import notify_students_of_reschedule
 from apps.timetable.validators import ExcelFileValidator
 from apps.timetable.utils import TimetableResponseFormatter
 
@@ -72,13 +74,94 @@ class TimetableSlotViewSet(ModelViewSet):
     def get_serializer_class(self):
         if self.action == "detailed":
             return TimetableSlotDetailedSerializer
+        if self.action == "reschedule":
+            return TimetableSlotRescheduleSerializer
         return TimetableSlotSerializer
+
+    def get_permissions(self):
+        # `reschedule` is deliberately open to the owning lecturer, unlike
+        # every other action on this viewset which stays admin-only
+        # (create/update/delete a slot's unit, program, lecturer, etc.).
+        if self.action == "reschedule":
+            return [CanRescheduleTimetableSlot()]
+        return super().get_permissions()
 
     @action(detail=True, methods=["get"])
     def detailed(self, request, pk=None):
         slot = self.get_object()
         serializer = TimetableSlotDetailedSerializer(slot)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"])
+    def reschedule(self, request, pk=None):
+        """
+        POST /api/v1/timetable/slots/{id}/reschedule/
+        Body: { "day_of_week"?, "start_time"?, "end_time"?, "room"?, "reason"? }
+
+        Moves a class to a new day/time/room. Callable by admins/registrar/
+        department admins for any slot, or by a lecturer for a slot they
+        teach. Rejects the change if it collides with another class already
+        booked in that room at the new day/time, and — on success — notifies
+        every student enrolled in the unit this term.
+        """
+        slot = self.get_object()  # runs CanRescheduleTimetableSlot.has_object_permission
+
+        serializer = TimetableSlotRescheduleSerializer(instance=slot, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        new_day = data.get("day_of_week", slot.day_of_week)
+        new_start = data.get("start_time", slot.start_time)
+        new_end = data.get("end_time", slot.end_time)
+        new_room = data.get("room", slot.room)
+        reason = data.get("reason", "")
+
+        conflict = (
+            TimetableSlot.objects.filter(term=slot.term_id, day_of_week=new_day, room=new_room)
+            .exclude(pk=slot.pk)
+            .filter(start_time__lt=new_end, end_time__gt=new_start)
+            .select_related("unit")
+            .first()
+        )
+        if conflict:
+            return Response(
+                {
+                    "detail": (
+                        f"{new_room.code} is already booked on "
+                        f"{conflict.get_day_of_week_display()} "
+                        f"{conflict.start_time:%H:%M}-{conflict.end_time:%H:%M} "
+                        f"for {conflict.unit.code if conflict.unit else 'another class'}."
+                    )
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        old_day, old_start, old_end, old_room = (
+            slot.day_of_week, slot.start_time, slot.end_time, slot.room,
+        )
+
+        slot.day_of_week = new_day
+        slot.start_time = new_start
+        slot.end_time = new_end
+        slot.room = new_room
+        slot.save(update_fields=["day_of_week", "start_time", "end_time", "room", "updated_at"])
+
+        notify_result = notify_students_of_reschedule(
+            slot,
+            old_day=old_day,
+            old_start=old_start,
+            old_end=old_end,
+            old_room=old_room,
+            reason=reason,
+            sent_by=request.user,
+        )
+
+        return Response(
+            {
+                "slot": TimetableSlotDetailedSerializer(slot).data,
+                "notified": notify_result,
+            }
+        )
 
 
 class TimetableConflictViewSet(ReadOnlyModelViewSet):

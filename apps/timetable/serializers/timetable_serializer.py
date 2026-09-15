@@ -186,6 +186,35 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
         return self.get_instructor(obj)
 
 
+class TimetableSlotRescheduleSerializer(serializers.Serializer):
+    """
+    Deliberately narrow: only the fields a reschedule is allowed to touch.
+    Unlike TimetableSlotSerializer, this can never be used to change the
+    unit, program, lecturer, or class_group on a slot.
+    """
+    day_of_week = serializers.ChoiceField(choices=TimetableSlot.WeekDay.choices, required=False)
+    start_time = serializers.TimeField(required=False)
+    end_time = serializers.TimeField(required=False)
+    room = serializers.PrimaryKeyRelatedField(
+        queryset=TimetableSlot._meta.get_field("room").related_model.objects.all(),
+        required=False,
+    )
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+    def validate(self, data):
+        if not any(k in data for k in ("day_of_week", "start_time", "end_time", "room")):
+            raise serializers.ValidationError(
+                "Provide at least one of day_of_week, start_time, end_time, room."
+            )
+
+        instance = self.instance
+        start_time = data.get("start_time", instance.start_time if instance else None)
+        end_time = data.get("end_time", instance.end_time if instance else None)
+        if start_time and end_time and start_time >= end_time:
+            raise serializers.ValidationError({"end_time": "Must be after start_time."})
+        return data
+
+
 class ConflictDetailSerializer(serializers.ModelSerializer):
     """Serializer for conflict details with slot information."""
     
