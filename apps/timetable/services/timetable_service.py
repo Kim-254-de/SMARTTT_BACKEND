@@ -261,27 +261,33 @@ class TimetableFilterService:
     @staticmethod
     def get_student_timetable(student, academic_year: str, semester: int):
         """
-        Get personalized timetable for a student, strictly filtering by
-        enrolled/curriculum units AND the student's specific timetable group/stream.
+        Get personalized timetable for a student by intersecting enrolled units 
+        with the student's program, study year, and timetable group.
         """
         from django.db.models import Q
         from apps.enrollments.models import StudentEnrollment
 
-        def apply_group_filter(queryset):
-            if student.timetable_group:
-                group_val = student.timetable_group.strip()
-                group_clean = re.sub(r'[^A-Z0-9]', '', group_val.upper())
-                # Match exact group name, normalized code, prefixed stream tags, or MAIN/general sessions
-                return queryset.filter(
-                    Q(student_group__iexact=group_val) |
-                    Q(student_group__iexact=group_clean) |
-                    Q(student_group__iexact=f"GR_{group_clean}") |
-                    Q(student_group__iexact=f"GR {group_clean}") |
-                    Q(student_group__isnull=True) |
-                    Q(student_group__iexact="MAIN") |
-                    Q(student_group__iexact="")
-                )
-            return queryset
+        # Base filters matching the student's academic profile
+        profile_filter = Q(
+            academic_year=academic_year,
+            semester=semester,
+            study_year=student.current_study_year,
+            program=student.program
+        )
+
+        # Optional group/stream filtering
+        if student.timetable_group:
+            group_val = student.timetable_group.strip()
+            group_clean = re.sub(r'[^A-Z0-9]', '', group_val.upper())
+            group_filter = (
+                Q(student_group__iexact=group_val) |
+                Q(student_group__iexact=group_clean) |
+                Q(student_group__isnull=True) |
+                Q(student_group__iexact="MAIN") |
+                Q(student_group__iexact="")
+            )
+        else:
+            group_filter = Q()
 
         # 1. Check for explicitly enrolled units first (from manual or portal sync)
         enrollments = StudentEnrollment.objects.filter(
@@ -294,20 +300,18 @@ class TimetableFilterService:
         if enrollments.exists():
             unit_ids = enrollments.values_list("unit_id", flat=True)
             sessions = TimetableSession.objects.filter(
-                unit_id__in=unit_ids,
-                academic_year=academic_year,
-                semester=semester
-            )
-            return apply_group_filter(sessions).order_by("day_of_week", "time_slot__start_time")
+                profile_filter,
+                unit_id__in=unit_ids
+            ).filter(group_filter)
+            
+            if sessions.exists():
+                return sessions.order_by("day_of_week", "time_slot__start_time")
 
-        # 2. Fallback to curriculum-based filtering if no explicit enrollments exist
-        program = student.program
-        study_year = student.current_study_year
-
+        # 2. Fallback to curriculum-based filtering if no explicit enrollments match
         sessions = TimetableSessionSelector.get_sessions_by_program(
-            program_id=str(program.id),
+            program_id=str(student.program.id),
             academic_year=academic_year,
-            study_year=study_year,
+            study_year=student.current_study_year,
             semester=semester,
         )
 
@@ -316,7 +320,7 @@ class TimetableFilterService:
             curriculum_unit_ids = curriculum.curriculum_units.values_list("unit_id", flat=True)
             sessions = sessions.filter(unit_id__in=curriculum_unit_ids)
 
-        return apply_group_filter(sessions).order_by("day_of_week", "time_slot__start_time")
+        return sessions.filter(group_filter).order_by("day_of_week", "time_slot__start_time")
 
     @staticmethod
     def get_filtered_timetable_by_day(sessions, day_of_week: str):
