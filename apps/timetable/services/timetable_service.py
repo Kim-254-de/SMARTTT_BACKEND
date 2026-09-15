@@ -261,6 +261,7 @@ class TimetableFilterService:
     - Student program
     - Curriculum units for study year/semester
     - Academic year and semester
+    - Student's specific timetable group / stream
     """
 
     @staticmethod
@@ -269,7 +270,7 @@ class TimetableFilterService:
         Get personalized timetable for a student.
 
         Dynamic filtering based on:
-        Student → Program → Curriculum → Units → TimetableSessions
+        Student → Program/Enrollments → Units & Timetable Group → TimetableSessions
 
         Args:
             student: Student instance
@@ -279,24 +280,39 @@ class TimetableFilterService:
         Returns:
             Queryset of timetable sessions for student
         """
-        # Check for explicitly enrolled units first
+        from django.db.models import Q
         from apps.enrollments.models import StudentEnrollment
+
+        # Helper to apply student group / stream filtering safely
+        def apply_group_filter(queryset):
+            if student.timetable_group:
+                group_clean = student.timetable_group.strip().upper()
+                return queryset.filter(
+                    Q(student_group__iexact=group_clean) |
+                    Q(student_group__isnull=True) |
+                    Q(student_group__iexact="MAIN") |
+                    Q(student_group__iexact="")
+                )
+            return queryset
+
+        # 1. Check for explicitly enrolled units first (from manual or portal sync)
         enrollments = StudentEnrollment.objects.filter(
             student=student,
             term__academic_year=academic_year,
             term__semester=semester,
             status=StudentEnrollment.Status.ENROLLED
         )
+        
         if enrollments.exists():
             unit_ids = enrollments.values_list("unit_id", flat=True)
-            return TimetableSession.objects.filter(
+            sessions = TimetableSession.objects.filter(
                 unit_id__in=unit_ids,
                 academic_year=academic_year,
                 semester=semester
             )
+            return apply_group_filter(sessions).order_by("day_of_week", "time_slot__start_time")
 
-        # Fallback to curriculum-based filtering
-        # Get student's program and study year
+        # 2. Fallback to curriculum-based filtering if no explicit enrollments exist
         program = student.program
         study_year = student.current_study_year
 
@@ -314,7 +330,7 @@ class TimetableFilterService:
             curriculum_unit_ids = curriculum.curriculum_units.values_list("unit_id", flat=True)
             sessions = sessions.filter(unit_id__in=curriculum_unit_ids)
 
-        return sessions
+        return apply_group_filter(sessions).order_by("day_of_week", "time_slot__start_time")
 
     @staticmethod
     def get_filtered_timetable_by_day(sessions, day_of_week: str):
@@ -335,7 +351,6 @@ class TimetableFilterService:
             "sessions_by_day": sessions.values("day_of_week").annotate(count=Count("id")),
             "sessions_by_type": sessions.values("session_type").annotate(count=Count("id")),
         }
-
 
 class RoomAllocationService:
     """
