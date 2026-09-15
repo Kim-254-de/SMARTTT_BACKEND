@@ -45,10 +45,16 @@ VENUE_PREFIXES = [
 ]
 VENUE_REGEX = re.compile(r"^(" + "|".join(VENUE_PREFIXES) + r")$", re.IGNORECASE)
 
-_COHORT_RE = re.compile(
-    r"^(?P<program>.+?)\s+Y(?P<year>\d+)S(?P<sem>\d+)(?:\s*\((?P<cohort_sub>\d+)\))?$", 
-    re.IGNORECASE
-)
+m = _COHORT_RE.match(s.cohort_label.strip())
+        if m:
+            program_code = m.group("program").strip()
+            year_of_study = int(m.group("year"))
+            semester = int(m.group("sem"))
+            cohort_sub = m.group("cohort_sub")
+            if cohort_sub:
+                class_group = f"STREAM_{cohort_sub}"
+            elif class_group == "MAIN" and s.group != "MAIN":
+                class_group = s.group
 
 DAY_MAP = {
     "mon": "mon", "monday": "mon",
