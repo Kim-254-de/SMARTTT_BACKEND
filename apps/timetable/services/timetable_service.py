@@ -287,11 +287,18 @@ class TimetableFilterService:
         def apply_group_filter(queryset):
             if student.timetable_group:
                 group_clean = student.timetable_group.strip().upper()
+                # Strict filtering: Keep sessions that match the student's group, 
+                # or are designated as MAIN / General / Empty, and explicitly 
+                # drop slots belonging to other named groups (e.g., if student is GR A, drop GR B).
                 return queryset.filter(
                     Q(student_group__iexact=group_clean) |
                     Q(student_group__isnull=True) |
                     Q(student_group__iexact="MAIN") |
                     Q(student_group__iexact="")
+                ).exclude(
+                    # If a slot explicitly belongs to a different named group stream, drop it
+                    ~Q(student_group__iexact=group_clean) & 
+                    Q(student_group__regex=r'^(GR|GROUP)\s*[A-Z0-9]+$')
                 )
             return queryset
 
