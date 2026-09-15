@@ -256,49 +256,30 @@ class TimetableSessionService:
 class TimetableFilterService:
     """
     Generate personalized timetables for students.
-
-    Filters timetable sessions based on:
-    - Student program
-    - Curriculum units for study year/semester
-    - Academic year and semester
-    - Student's specific timetable group / stream
     """
 
     @staticmethod
     def get_student_timetable(student, academic_year: str, semester: int):
         """
-        Get personalized timetable for a student.
-
-        Dynamic filtering based on:
-        Student → Program/Enrollments → Units & Timetable Group → TimetableSessions
-
-        Args:
-            student: Student instance
-            academic_year: Academic year
-            semester: Semester
-
-        Returns:
-            Queryset of timetable sessions for student
+        Get personalized timetable for a student, strictly filtering by
+        enrolled/curriculum units AND the student's specific timetable group/stream.
         """
         from django.db.models import Q
         from apps.enrollments.models import StudentEnrollment
 
-        # Helper to apply student group / stream filtering safely
         def apply_group_filter(queryset):
             if student.timetable_group:
-                group_clean = student.timetable_group.strip().upper()
-                # Strict filtering: Keep sessions that match the student's group, 
-                # or are designated as MAIN / General / Empty, and explicitly 
-                # drop slots belonging to other named groups (e.g., if student is GR A, drop GR B).
+                group_val = student.timetable_group.strip()
+                group_clean = re.sub(r'[^A-Z0-9]', '', group_val.upper())
+                # Match exact group name, normalized code, prefixed stream tags, or MAIN/general sessions
                 return queryset.filter(
+                    Q(student_group__iexact=group_val) |
                     Q(student_group__iexact=group_clean) |
+                    Q(student_group__iexact=f"GR_{group_clean}") |
+                    Q(student_group__iexact=f"GR {group_clean}") |
                     Q(student_group__isnull=True) |
                     Q(student_group__iexact="MAIN") |
                     Q(student_group__iexact="")
-                ).exclude(
-                    # If a slot explicitly belongs to a different named group stream, drop it
-                    ~Q(student_group__iexact=group_clean) & 
-                    Q(student_group__regex=r'^(GR|GROUP)\s*[A-Z0-9]+$')
                 )
             return queryset
 
@@ -323,7 +304,6 @@ class TimetableFilterService:
         program = student.program
         study_year = student.current_study_year
 
-        # Get sessions for this program/year/semester
         sessions = TimetableSessionSelector.get_sessions_by_program(
             program_id=str(program.id),
             academic_year=academic_year,
@@ -331,7 +311,6 @@ class TimetableFilterService:
             semester=semester,
         )
 
-        # Filter to only units in curriculum
         curriculum = student.get_current_curriculum()
         if curriculum:
             curriculum_unit_ids = curriculum.curriculum_units.values_list("unit_id", flat=True)
