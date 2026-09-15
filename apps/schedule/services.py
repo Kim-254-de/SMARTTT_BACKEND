@@ -13,6 +13,7 @@ Algorithm:
 from __future__ import annotations
 
 from apps.courses.models import StudentUnit
+from django.db.models import Q
 from apps.timetable.models import AcademicTerm, TimetableSlot
 from apps.timetable.utils.day_order import day_of_week_sort_case
 
@@ -75,15 +76,36 @@ def generate_for_user(user) -> dict:
             },
         }
 
-    # ── 3. Fetch matching timetable slots ──────────────────────────────────────
+        # ── 3. Fetch matching timetable slots ──────────────────────────────────────
+    student = getattr(user, "student_profile", None)
+
+    slot_filter = Q(term=term, unit_id__in=unit_ids)
+    if student and student.program_id:
+        slot_filter &= Q(program_id=student.program_id) | Q(program__isnull=True)
+    if student and student.current_study_year:
+        slot_filter &= Q(year_of_study=student.current_study_year) | Q(program__isnull=True)
+
     raw_slots = list(
         TimetableSlot.objects.select_related(
             "unit", "program", "lecturer__user", "room", "term"
         )
-        .filter(term=term, unit_id__in=unit_ids)
+        .filter(slot_filter)
         .annotate(_day_sort=day_of_week_sort_case())
         .order_by("_day_sort", "start_time")
     )
+
+    if student and student.timetable_group:
+        groups_per_unit: dict = {}
+        for slot in raw_slots:
+            groups_per_unit.setdefault(slot.unit_id, set()).add(slot.class_group or "MAIN")
+
+        def _matches_group(slot: TimetableSlot) -> bool:
+            unit_groups = groups_per_unit.get(slot.unit_id, set())
+            if len(unit_groups) <= 1:
+                return True
+            return (slot.class_group or "MAIN") == student.timetable_group
+
+        raw_slots = [s for s in raw_slots if _matches_group(s)]
 
     # ── 3b. DEDUPLICATION: Purge duplicate slots from repeated file uploads ─────
     seen_signatures = set()

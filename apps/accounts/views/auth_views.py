@@ -235,7 +235,12 @@ class ProfileView(APIView):
             if 'timetable_group' in data:
                 student.timetable_group = str(data['timetable_group']).strip()
 
-            if 'course' in data and 'department' in data:
+            if 'program_id' in data and data['program_id']:
+                program = Program.objects.filter(id=data['program_id']).select_related('department').first()
+                if program:
+                    student.program = program
+                    student.department = program.department
+            elif 'course' in data and 'department' in data:
                 dept_code = re.sub(r'[^A-Z]', '', data['department'].upper())[:20]
                 if not dept_code: dept_code = data['department'].upper()[:20]
 
