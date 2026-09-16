@@ -91,6 +91,20 @@ class TimetableSlot(BaseModel):
     start_time = models.TimeField()
     end_time = models.TimeField()
     class_group = models.CharField(max_length=50, default="MAIN")
+    stream = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        help_text="Numbered sub-stream of this program+year+semester cohort as "
+                  "printed on the master timetable, e.g. the '1' in "
+                  "'BED.MATH/CHEM Y3S1(1)'. Blank when the cohort has only one "
+                  "stream. Unlike class_group (which varies per shared unit "
+                  "pool - e.g. GR_J for one pool, GR_C for another, within the "
+                  "same stream), this identifies the single physical row/class "
+                  "the slot was printed under, so a student's whole stream can "
+                  "be selected as one consistent set regardless of how many "
+                  "different class_group letters its units individually use.",
+    )
     upload_batch = models.ForeignKey(
         "timetable.TimetableUploadBatch",
         on_delete=models.SET_NULL,

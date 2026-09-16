@@ -239,7 +239,31 @@ class ProfileView(APIView):
             if 'timetable_group' in data:
                 student.timetable_group = str(data['timetable_group']).strip()
 
-            if 'course' in data and 'department' in data:
+            resolved_program = None
+            if data.get('program_id'):
+                # Preferred path: the student picked their course from
+                # timetable/metadata/, which only lists Program rows the
+                # master timetable upload actually created — linking to
+                # this exact row (rather than get_or_create-ing a new one
+                # by name below) is what lets schedule generation match
+                # TimetableSlot.program correctly.
+                try:
+                    resolved_program = Program.objects.select_related('department').get(
+                        pk=data['program_id']
+                    )
+                except (Program.DoesNotExist, ValueError, TypeError):
+                    resolved_program = None
+
+            if resolved_program:
+                student.program = resolved_program
+                student.department = resolved_program.department
+            elif 'course' in data and 'department' in data:
+                # Fallback only: used when resolution above failed/wasn't
+                # provided (e.g. a term with no timetable slots yet). This
+                # get_or_create-by-name path creates its own Program/Department
+                # rows and will NOT generally match the ones the master
+                # timetable upload created, so it should not be relied on
+                # once slots exist.
                 dept_code = re.sub(r'[^A-Z]', '', data['department'].upper())[:20]
                 if not dept_code: dept_code = data['department'].upper()[:20]
 
@@ -253,10 +277,10 @@ class ProfileView(APIView):
                     name=data['department'],
                     defaults={'code': dept_code},
                 )
-                
+
                 prog_code = re.sub(r'[^A-Z]', '', data['course'].upper())[:30]
                 if not prog_code: prog_code = data['course'].upper()[:30]
-                
+
                 study_year = student.current_study_year
                 prog, _ = Program.objects.get_or_create(
                     department=dept,

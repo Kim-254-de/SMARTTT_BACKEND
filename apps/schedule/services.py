@@ -12,6 +12,8 @@ Algorithm:
 """
 from __future__ import annotations
 
+from django.db.models import Q
+
 from apps.courses.models import StudentUnit
 from apps.timetable.models import AcademicTerm, TimetableSlot
 from apps.timetable.utils.day_order import day_of_week_sort_case
@@ -76,11 +78,31 @@ def generate_for_user(user) -> dict:
         }
 
     # ── 3. Fetch matching timetable slots ──────────────────────────────────────
+    # A shared unit (e.g. a foundation course like EDCI or EPSC) can be taught
+    # to several different combinations/streams in parallel, each as its own
+    # TimetableSlot row. Filtering by unit alone would return every one of
+    # those - not just the student's own class. Narrow by the student's
+    # program (their exact combination, e.g. "BED.MATH/CHEM" - resolved via
+    # the preferences screen, see ProfileView.patch's program_id handling)
+    # and, when set, their stream (the numbered sub-class within that
+    # program+year, e.g. the "1" in "...Y3S1(1)" - see TimetableSlot.stream).
+    # Slots with a blank stream aren't split into multiple classes for that
+    # unit, so they always match regardless of the student's stream.
+    student = getattr(user, "student_profile", None)
+    program_id = getattr(student, "program_id", None)
+    stream = (getattr(student, "timetable_group", None) or "").strip()
+
+    slot_filter = Q(term=term, unit_id__in=unit_ids)
+    if program_id:
+        slot_filter &= Q(program_id=program_id)
+    if stream:
+        slot_filter &= (Q(stream=stream) | Q(stream=""))
+
     raw_slots = list(
         TimetableSlot.objects.select_related(
             "unit", "program", "lecturer__user", "room", "term"
         )
-        .filter(term=term, unit_id__in=unit_ids)
+        .filter(slot_filter)
         .annotate(_day_sort=day_of_week_sort_case())
         .order_by("_day_sort", "start_time")
     )

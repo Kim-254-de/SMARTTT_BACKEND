@@ -266,14 +266,25 @@ def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027
         year_of_study = 1
         semester = 1
         class_group = s.group
+        stream = ""
 
         m = _COHORT_RE.match(s.cohort_label.strip())
         if m:
             program_code = m.group("program").strip()
             year_of_study = int(m.group("year"))
             semester = int(m.group("sem"))
-            if class_group == "MAIN" and m.group("cohort_sub"):
-                class_group = f"GR_{m.group('cohort_sub')}"
+            # The row's own sub-stream number, e.g. the "1" in "...Y3S1(1)".
+            # Captured independently of class_group: a unit's own GR-letter
+            # (parsed from its cell text) only distinguishes that unit's
+            # specific pool-group, not which physical row/class it came from
+            # - different unit pools in the same stream carry different
+            # letters (see TimetableSlot.stream docstring), so this must not
+            # be overwritten or skipped just because class_group already has
+            # a value.
+            if m.group("cohort_sub"):
+                stream = m.group("cohort_sub")
+                if class_group == "MAIN":
+                    class_group = f"GR_{stream}"
 
         unit_code = normalise_unit_code(s.unit_code_raw)
         if not unit_code or len(unit_code) < 3:
@@ -300,6 +311,7 @@ def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027
             "program_code": program_code[:64],
             "unit_code": unit_code[:20],
             "class_group": class_group,
+            "stream": stream[:10],
             "day_of_week": code_day,
             "start_time": start_str,
             "end_time": end_str,

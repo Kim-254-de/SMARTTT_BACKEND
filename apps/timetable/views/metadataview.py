@@ -10,7 +10,7 @@ class TimetableMetadataView(APIView):
     def get(self, request):
         current_term = AcademicTerm.objects.filter(is_current=True).first()
         if not current_term:
-            return Response({"courses": [], "years": [], "groups": []}, status=200)
+            return Response({"courses": [], "years": [], "streams": []}, status=200)
 
         slots = TimetableSlot.objects.filter(term=current_term).select_related('program')
 
@@ -36,39 +36,30 @@ class TimetableMetadataView(APIView):
         if year_of_study:
             filtered_slots = filtered_slots.filter(year_of_study=year_of_study)
 
-        # 3. Scoped Groups with Smart Fallback
-        raw_groups = list(filtered_slots.values_list('class_group', flat=True))
-        cleaned_groups = [g.strip() for g in raw_groups if g and g.strip()]
-        
-        unique_groups = set(cleaned_groups)
-
-        # Smart check: If 'MAIN' exists alongside fragmented GR_x groups, 
-        # check if MAIN is the intended primary stream for non-split courses.
-        # If a program relies heavily on MAIN or has a clean unified structure, 
-        # we can prioritize MAIN or filter out unwanted external cross-program groups.
-        if "MAIN" in unique_groups and len(unique_groups) > 1:
-            # Check if non-MAIN groups are just a minority overflow (common units shared with other streams)
-            main_count = cleaned_groups.count("MAIN")
-            total_count = len(cleaned_groups)
-            
-            # If MAIN makes up more than 40% or if it's a strict pure course, 
-            # you can choose to collapse or surface MAIN prominently. 
-            # For courses with no groups, often forcing just ['MAIN'] or filtering out GR_ if MAIN is dominant works:
-            if main_count / total_count > 0.3:
-                # Keep MAIN and filter out minor cross-stream contamination if needed, 
-                # or safely default to letting them choose MAIN.
-                groups = ["MAIN"]
-            else:
-                groups = sorted(list(unique_groups))
-        elif not unique_groups:
-            groups = ["MAIN"]
-        else:
-            groups = sorted(list(unique_groups))
+        # Distinct sub-streams for this program+year, e.g. the "1"/"2" in
+        # "BED.MATH/CHEM Y3S1(1)" / "...(2)". Unlike class_group (which
+        # varies per shared unit pool within a single stream - see
+        # TimetableSlot.stream docstring), stream identifies the single
+        # physical row/class a student actually belongs to, so it's what
+        # the student needs to pick to disambiguate their whole timetable.
+        raw_streams = list(filtered_slots.values_list('stream', flat=True))
+        streams = sorted({s.strip() for s in raw_streams if s and s.strip()})
 
         return Response({
             "semester": current_term.semester,
             "academic_year": current_term.academic_year,
             "courses": courses,
             "years": years,
-            "groups": groups,
+            # "streams" is empty when this program+year has only one class
+            # (no disambiguation needed) - the frontend should skip the
+            # picker in that case rather than showing an empty dropdown.
+            "streams": streams,
+            # The frontend saves this (not the raw course id it already
+            # holds) back to ProfileView.patch as program_id, so student
+            # preferences link to the exact Program row the master
+            # timetable upload created - not a name-based get_or_create
+            # that would silently create a disconnected duplicate. Since
+            # "courses" above is already keyed by real Program.id, this is
+            # just an echo of the selected program_id once one is chosen.
+            "resolved_program_id": program_id or None,
         })

@@ -173,6 +173,7 @@ class TimetablePersistenceService:
                 start_time_val = str(row.get("start_time") or "")
                 end_time_val = str(row.get("end_time") or "")
                 class_group_val = str(row.get("class_group") or "MAIN")
+                stream_val = str(row.get("stream") or "").strip()
                 year_of_study_val = int(row.get("year_of_study") or 1)
 
                 slot_dedup_key = (
@@ -185,6 +186,7 @@ class TimetablePersistenceService:
                     end_time_val,
                     room.id if room else None,
                     class_group_val,
+                    stream_val,
                 )
 
                 if slot_dedup_key in seen_slot_keys:
@@ -202,6 +204,7 @@ class TimetablePersistenceService:
                     start_time=start_time_val,
                     end_time=end_time_val,
                     class_group=class_group_val,
+                    stream=stream_val,
                     upload_batch=upload_batch,
                 )
                 slots_to_create.append(slot)
