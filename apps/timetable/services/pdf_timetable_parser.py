@@ -121,9 +121,16 @@ def parse_unit_and_group(text: str) -> tuple[str, str]:
 
 def _is_likely_venue(text: str) -> bool:
     cleaned = text.strip().upper()
-    return bool(VENUE_REGEX.match(cleaned)) or any(
-        cleaned.startswith(p) for p in ["UTC", "ASB", "TC", "ED", "BS", "STB", "ADM"]
-    ) or bool(re.match(r"^G\s*\d{1,3}$", cleaned))
+    # VENUE_REGEX is already anchored (^...$) and covers every real venue
+    # format (UTC 6, UTC-AC4, ASB 2, TC 11, ED 3, STB 7, ADM 1, G 30, ...).
+    # An earlier version additionally used an unanchored .startswith() check
+    # against these same prefixes as a fallback - that's what caused unit
+    # codes like "EDCI 312"/"EDCI 311" (any BEd course starting with "ED")
+    # to be misclassified as room codes and silently dropped, since
+    # "EDCI 312".startswith("ED") is True even though it's nothing like an
+    # actual "ED 3"-style room code. VENUE_REGEX alone is sufficient and
+    # correct - it requires the digits/code that make a string a venue.
+    return bool(VENUE_REGEX.match(cleaned)) or bool(re.match(r"^G\s*\d{1,3}$", cleaned))
 
 
 def _extract_day_col_map(header_row: list) -> dict[int, str]:
@@ -151,6 +158,40 @@ def _split_cell_lines(cell_val: str | None) -> list[str]:
         return []
     lines = [l.strip() for l in str(cell_val).split("\n") if l.strip()]
     return lines
+
+
+# Matches a line ending in a bare "GR"/"GR."/"GROUP" marker with nothing
+# captured after it - see _merge_split_group_lines.
+_TRAILING_GR_RE = re.compile(r"\b(?:GR\.?|GROUP)\s*$", re.IGNORECASE)
+
+
+def _merge_split_group_lines(lines: list[str]) -> list[str]:
+    """
+    Most cells wrap as three clean lines, e.g. ["EDCI 312", "GR J", "UTC 6"].
+    But some wrap the group annotation differently, e.g.
+    ["EPSC 311 GR", "J", "UTC-AC4"] - the "GR" sticks to the unit-code line
+    and only the bare letter ends up on its own line. parse_unit_and_group
+    can't find "GR" followed by a letter on the same line in that case, so
+    it silently fails to extract anything, garbling the unit code (e.g.
+    "EPSC311GR") and losing the real group letter entirely. Detect a line
+    ending in a bare GR marker and merge it with the next line before
+    parsing, so it reads the same as the normal case.
+    """
+    merged = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if (
+            _TRAILING_GR_RE.search(line)
+            and i + 1 < len(lines)
+            and re.match(r"^[A-Z0-9]{1,3}$", lines[i + 1].strip(), re.IGNORECASE)
+        ):
+            merged.append(f"{line} {lines[i + 1].strip()}")
+            i += 2
+        else:
+            merged.append(line)
+            i += 1
+    return merged
 
 
 def parse_pdf(path: str) -> ParseResult:
@@ -208,7 +249,7 @@ def parse_pdf(path: str) -> ParseResult:
                         if not cell_raw:
                             continue
 
-                        unit_lines = _split_cell_lines(cell_raw)
+                        unit_lines = _merge_split_group_lines(_split_cell_lines(cell_raw))
                         v_lines = _split_cell_lines(venue_row[c]) if (venue_row and c < len(venue_row)) else []
 
                         if not v_lines and len(unit_lines) >= 2:
