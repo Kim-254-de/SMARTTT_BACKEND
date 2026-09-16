@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.lecturers.models import Lecturer
-from apps.personalization.services.personalization_cache_service import PersonalizationCacheService
+from apps.common.services.cache_service import PersonalizationCacheService
 from apps.timetable.models import AcademicTerm, TimetableSlot
 from apps.timetable.permissions import CanManageTimetable
 from apps.timetable.services.allocation_parser import (

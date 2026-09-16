@@ -11,7 +11,7 @@ from apps.enrollments.models import StudentEnrollment
 from apps.enrollments.serializers import StudentEnrollmentSerializer
 from apps.timetable.models import AcademicTerm
 from apps.curriculum.models import CurriculumUnit
-from apps.personalization.services.personalization_cache_service import PersonalizationCacheService
+from apps.common.services.cache_service import PersonalizationCacheService
 
 
 class StudentEnrollmentViewSet(ModelViewSet):
