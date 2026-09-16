@@ -118,6 +118,14 @@ class TimetablePersistenceService:
             for rm in Room.objects.filter(code__in=missing_r_codes):
                 cache["room"][rm.code.lower()] = rm
 
+        # TimetableSlot.room is required — some sessions in the source file
+        # have no venue assigned yet, so fall back to a shared placeholder
+        # rather than letting bulk_create fail on a NOT NULL violation.
+        tba_room, _ = Room.objects.get_or_create(
+            code="TBA", defaults={"name": "To Be Announced", "capacity": 50}
+        )
+        cache["room"]["__tba__"] = tba_room
+
         # 6. Lecturers (optional)
         lecturer_ids = {
             str(r["lecturer_university_id"]).strip()
@@ -161,7 +169,7 @@ class TimetablePersistenceService:
 
                 program = cache["program"].get(str(row["program_code"]).strip().lower())
                 unit = cache["unit"].get(str(row["unit_code"]).strip().lower())
-                room = cache["room"].get(str(row["room_code"]).strip().lower())
+                room = cache["room"].get(str(row.get("room_code") or "").strip().lower()) or cache["room"]["__tba__"]
 
                 lec_id = str(row.get("lecturer_university_id") or "").strip().lower()
                 lecturer = cache["lecturer"].get(lec_id) if lec_id else None

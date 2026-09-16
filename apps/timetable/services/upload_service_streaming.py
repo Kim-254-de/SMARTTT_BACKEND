@@ -52,10 +52,25 @@ def _get_or_create_term(academic_year: str, semester: int) -> AcademicTerm:
     return term
 
 
+# Normalise the many day spellings the parsers can emit to TimetableSlot.WeekDay values.
+_DAY_NORMALISE: dict[str, str] = {
+    "monday": "mon",    "mon": "mon",
+    "tuesday": "tue",   "tue": "tue",
+    "wednesday": "wed", "wed": "wed",
+    "thursday": "thu",  "thu": "thu",
+    "friday": "fri",    "fri": "fri",
+    "saturday": "sat",  "sat": "sat",
+}
+
+
 def _process_row_to_slot(row: dict) -> tuple[TimetableSlot | None, Optional[str]]:
     """
     Convert a parsed row dict to a TimetableSlot model instance.
     Returns (slot, error_message) tuple.
+
+    Accepts rows produced by either the PDF parser (keys: program_code,
+    year_of_study, room_code, class_group, day_of_week …) or the legacy
+    Excel/flat format (keys may use "day", "room" etc.).
     """
     try:
         department = resolve_department(row)
@@ -70,9 +85,11 @@ def _process_row_to_slot(row: dict) -> tuple[TimetableSlot | None, Optional[str]
         if not start_time or not end_time:
             return None, "Start time and end time are required"
 
-        day = str(row.get("day") or "").upper()
-        if day not in [c.value for c in TimetableSlot.WeekDay]:
-            return None, f"Invalid day value: {day!r}"
+        # Normalise day: accept "Monday", "monday", "mon", "MON", etc.
+        raw_day = str(row.get("day_of_week") or row.get("day") or "").strip().lower()
+        day = _DAY_NORMALISE.get(raw_day) or _DAY_NORMALISE.get(raw_day[:3])
+        if not day:
+            return None, f"Invalid day value: {raw_day!r}"
 
         academic_year = str(row.get("academic_year") or "2026/2027").strip()
         semester = int(row.get("semester") or 1)
@@ -87,11 +104,11 @@ def _process_row_to_slot(row: dict) -> tuple[TimetableSlot | None, Optional[str]
                 year_of_study=year_of_study,
                 lecturer=lecturer,
                 room=room,
-                day=day,
+                day_of_week=day,
                 start_time=start_time,
                 end_time=end_time,
-                class_group=row.get("class_group", "MAIN"),
-                upload_batch=None,  # Will be set after successful creation
+                class_group=row.get("class_group") or "MAIN",
+                upload_batch=None,  # set by _save_slot_batch
             ),
             None,
         )
@@ -296,7 +313,7 @@ def _save_slot_batch(
                 unit=slot.unit,
                 program=slot.program,
                 year_of_study=slot.year_of_study,
-                day=slot.day,
+                day_of_week=slot.day_of_week,
                 start_time=slot.start_time,
                 defaults={
                     "end_time": slot.end_time,
@@ -316,25 +333,17 @@ def _save_slot_batch(
     return saved_count
 
 
-def to_timetable_slot_dicts_from_batch(raw_slots):
-    """Convert a batch of RawSlot objects to row dicts."""
-    from apps.timetable.services.pdf_timetable_parser import normalise_unit_code
-    
-    out = []
-    for s in raw_slots:
-        out.append(
-            {
-                "cohort_label": s.cohort_label,
-                "day": s.day,
-                "start_time": f"{s.start_time}:00",
-                "end_time": f"{s.end_time}:00",
-                "unit_code": normalise_unit_code(s.unit_code_raw),
-                "venue": f"{s.venue} {s.room}" if s.venue else None,
-                "lecturer_name_text": "",
-                "source_page": s.page,
-            }
-        )
-    return out
+def to_timetable_slot_dicts_from_batch(raw_slots, academic_year: str = "2026/2027"):
+    """
+    Convert a batch of RawSlot objects to row dicts with keys that match
+    TimetablePersistenceService.save_rows() expectations.
+    Delegates to the canonical implementation in pdf_timetable_parser.
+    """
+    from apps.timetable.services.pdf_timetable_parser import (
+        ParseResult,
+        to_timetable_slot_dicts,
+    )
+    return to_timetable_slot_dicts(ParseResult(slots=list(raw_slots)), academic_year=academic_year)
 
 
 # Backwards compatibility: delegate to streaming version

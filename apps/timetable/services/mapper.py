@@ -41,9 +41,12 @@ def resolve_department(row: dict) -> Department:
 
 
 def resolve_program(row: dict, department: Department) -> Program:
-    raw = str(row.get("program") or "").strip()
+    # Accept "program_code" (PDF parser) or "program" (Excel flat).
+    raw = (
+        str(row.get("program_code") or "").strip()
+        or str(row.get("program") or "").strip()
+    )
     if not raw:
-        # Create a generic program for this department
         raw = f"{department.name} Programme"
     code = _to_code(raw, 50)
     prog = Program.objects.filter(
@@ -79,8 +82,13 @@ def resolve_unit(row: dict, department: Department) -> Unit | None:
 
 
 def resolve_room(row: dict) -> Room | None:
-    raw = str(row.get("room") or "").strip()
-    if not raw or raw.upper() == "TBA":
+    # Accept "room_code" (PDF parser), "room" (Excel flat), or "venue" (legacy).
+    raw = (
+        str(row.get("room_code") or "").strip()
+        or str(row.get("room") or "").strip()
+        or str(row.get("venue") or "").strip()
+    )
+    if not raw or raw.upper() in ("TBA", ""):
         return None
     code = raw[:30]
     room = Room.objects.filter(Q(code__iexact=code) | Q(code__iexact=re.sub(r"\s", "", code))).first()

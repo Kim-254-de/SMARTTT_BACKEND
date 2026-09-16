@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from django.db import models
@@ -111,18 +112,25 @@ class PersonalizationSelector:
 			],
 		)
 
-		# Filter by specific timetable stream group if assigned
+		# Filter by specific timetable stream group if assigned, always keeping
+		# shared sessions (no group / "MAIN") that apply to every stream.
+		# `combination` has no dedicated column on TimetableSession — the
+		# combination narrows which units the student is enrolled in
+		# upstream (curriculum/enrollment), not which session rows match.
 		if timetable_group:
+			group_clean = re.sub(r"[^A-Z0-9]", "", timetable_group.strip().upper())
 			qs = qs.filter(
-				models.Q(class_group__iexact=timetable_group) | 
-				models.Q(class_group__icontains=timetable_group)
+				models.Q(student_group__iexact=timetable_group.strip())
+				| models.Q(student_group__iexact=group_clean)
+				| models.Q(student_group__isnull=True)
+				| models.Q(student_group__iexact="MAIN")
+				| models.Q(student_group__iexact="")
 			)
-
-		# Filter by combination/specialization option if assigned
-		if combination:
+		else:
 			qs = qs.filter(
-				models.Q(combination__iexact=combination) | 
-				models.Q(combination__icontains=combination)
+				models.Q(student_group__isnull=True)
+				| models.Q(student_group__iexact="MAIN")
+				| models.Q(student_group__iexact="")
 			)
 
 		return qs.order_by("day_of_week", "time_slot__start_time", "unit__code")

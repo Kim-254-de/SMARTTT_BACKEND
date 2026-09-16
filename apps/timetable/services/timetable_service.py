@@ -8,7 +8,7 @@ Orchestrates business logic:
 - LecturerScheduleService: Manage lecturer teaching schedules
 - TimetableConflictService: Detect and report conflicts
 """
-
+import re
 from django.db import models, transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Count, F, Sum

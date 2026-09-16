@@ -22,6 +22,17 @@ def _normalise_code(raw: str) -> str:
     return re.sub(r"\s+", "", raw.upper())
 
 
+def _strip_group_suffix(code: str) -> str:
+    """
+    Remove a trailing group label that the PDF parser may have left on a
+    unit code before the DB was fixed.  Handles codes like:
+        "MATH124GRK"  → "MATH124"
+        "PHIL210GRX"  → "PHIL210"
+        "COSC160"     → "COSC160"  (no change)
+    """
+    return re.sub(r"GR[A-Z0-9]$", "", code)
+
+
 @transaction.atomic
 def sync_units_for_student(user, unit_list: list[dict]) -> dict:
     """
@@ -59,6 +70,20 @@ def sync_units_for_student(user, unit_list: list[dict]) -> dict:
                 if _normalise_code(u.code) == clean:
                     unit = u
                     break
+
+        # Fallback: DB may still have corrupted codes with group suffix attached
+        # (e.g. "MATH124GRK" stored before the parser fix).  Try stripping it.
+        if not unit:
+            stripped = _strip_group_suffix(clean)
+            if stripped != clean:
+                unit = Unit.objects.filter(
+                    code__iregex=rf"^{re.escape(stripped)}$"
+                ).first()
+                if not unit:
+                    for u in Unit.objects.filter(code__icontains=stripped[:4]):
+                        if _normalise_code(_strip_group_suffix(u.code)) == stripped:
+                            unit = u
+                            break
 
         if unit:
             matched.append(unit)

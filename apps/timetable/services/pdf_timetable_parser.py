@@ -1,13 +1,40 @@
 """
-timetable/services/pdf_timetable_parser.py
+timetable/parsers/pdf_grid_parser.py
 
-Parser for Tharaka University Master Teaching Timetable.
-Handles:
-  - Unit code normalisation (normalise_unit_code)
-  - Disentangling stacked units and venues per cell
-  - Parsing unit groups (e.g., MATH 124 GR.M, PHYS 121 GRA, EDCI 104 GRJ)
-  - Pairing separate venues to separate units
-  - Lowercase day-of-week codes (mon, tue, wed, thu, fri)
+Parser for Tharaka University "Directorate of Examinations and Timetabling"
+master teaching timetable PDFs (e.g. "MAY-AUGUST 2026 TEACHING TIMETABLE").
+
+Layout (IMPORTANT: header blocks do NOT repeat on every PDF page -- they
+recur roughly every ~8-10 cohort rows, wherever the source document
+inserted a fresh "Monday..Friday" band, which can land mid-page. A PDF
+page therefore often contains a table that is pure cohort data with NO
+header at all, relying on the header parsed from an earlier table.
+Column position -> (day, hour) meaning must be carried as state across
+tables/pages, not re-derived per page):
+
+  - pdfplumber detects one or more tables per page. Processed in
+    document (page, then top-to-bottom) order:
+      * A table whose row 0 contains a day name ("Monday" etc.) is a
+        HEADER table: row 0 = day bands (each spanning 12 hourly
+        columns, 7-8 .. 18-19), row 1 = hourly slot labels. Any
+        remaining rows (2+) are cohort data rows using this header.
+      * A table whose row 0 does NOT contain a day name is a pure
+        DATA table: every row is a cohort row, using the most
+        recently seen header state.
+  - Each cohort data row: column 0 holds the cohort label
+    ("<PROGRAMME> <YEAR><SEM>", e.g. "BSC.CRIMINOLOGY Y2S2"); the
+    remaining columns line up with the current header's day/hour grid.
+  - Each populated cell holds a class: unit code (often line-wrapped
+    unevenly, e.g. "CR\\nSS\\n021 0") followed by a venue code + room
+    number (e.g. "UTC 12"). A class spanning >1 hour is a merged cell;
+    pdfplumber represents the spanned columns as `None`.
+
+This mirrors the existing Excel "2D grid" parser's contract: it emits
+plain dicts shaped like TimetableSlot fields so the same
+validation / bulk-upsert / unit-code-normalisation code path can consume
+either source. See `to_timetable_slot_dicts()`.
+
+Dependencies: pdfplumber (`pip install pdfplumber`).
 """
 
 from __future__ import annotations
@@ -15,64 +42,100 @@ from __future__ import annotations
 import re
 import logging
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Tuple
+from typing import Iterable
 
 import pdfplumber
 
 logger = logging.getLogger(__name__)
 
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+HOURS_PER_DAY = 12  # columns 7-8 .. 18-19
+COLS_PER_DAY = HOURS_PER_DAY
 LABEL_COL = 0
 
-# Match Group annotations: GR.M, GR M, GRA, GR A, GR 1, GROUP A
-GROUP_RE = re.compile(
-    r"(?:\b(?:GR\.?|GROUP)\s*([A-Z0-9]+)\b)|(?:\bGR([A-Z0-9]+)\b)", 
-    re.IGNORECASE
-)
-
-# Known Venue matching regex
-VENUE_PREFIXES = [
-    r"UTC-[A-Z0-9]+",  # UTC-AB3, UTC-AA1, UTC-AC4
-    r"UTC\s*\d+",      # UTC 12, UTC 6
-    r"ASB\s*[A-Z0-9]+",# ASB 1, ASB 2, ASBJ
-    r"ASH\s*[A-Z0-9]+",
-    r"ADM\s*\d*",      # ADM 1
-    r"STB\s*\d+",      # STB 4, STB 8
-    r"TC\s*[A-Z0-9]+", # TC 1, TC 11, TCX, TCL
-    r"ED\s*\d+",       # ED 3, ED 4, ED 5
-    r"BS\s*\d+",       # BS 1, BS 2, BS 3
-    r"G\s*\d+",        # G1, G2, G14, G30
+# ---------------------------------------------------------------------------
+# Venue detection — TUN timetable room codes
+# ---------------------------------------------------------------------------
+# Each entry is (compiled_regex, room_code_template).
+# The regex captures two named groups:
+#   "prefix" — everything before the venue (unit code + optional group label)
+#   "room"   — the room identifier (digits or letter+digit suffix)
+# Patterns are tried in order; the FIRST match wins, so list most-specific first.
+#
+# TUN room families:
+#   UTC-AE4, UTC-AC2, UTC-AB3 … (Academic Complex, letter+digit code)
+#   UTC5, UTC12                  (plain digit UTC rooms, e.g. "UTC 5")
+#   ASB1, ASB2, ASB3             (Applied Science Buildings)
+#   STB1 … STB8                  (Science/Technology Buildings)
+#   TC1 … TC12                   (Tuition Centres)
+#   ED3, ED4, ED5                (Engineering Drawing rooms)
+#   BS1 … BS5                    (Biology/Science labs)
+#   G1 … G39                     (General lecture rooms numbered 1-39)
+# ---------------------------------------------------------------------------
+_VENUE_SPECS: list[tuple] = [
+    # UTC with letter code: "UTC-AE4", "UTC-AC2" (hyphen preserved by despacer)
+    (re.compile(r"^(?P<prefix>.+?)UTC-(?P<room>[A-Z]{1,3}\d{1,2})$"), "UTC-{room}"),
+    # UTC with plain digits: "UTC5", "UTC12" (no hyphen, e.g. "UTC 5" → "UTC5")
+    (re.compile(r"^(?P<prefix>.+?)UTC(?P<room>\d{1,3})$"), "UTC{room}"),
+    # ASB — listed before BS/STB so "ASB2" isn't partially matched as "BS"
+    (re.compile(r"^(?P<prefix>.+?)ASB(?P<room>\d{1,2})$"), "ASB{room}"),
+    # STB — listed before TC/BS so "STB3" isn't partially matched as "TB"
+    (re.compile(r"^(?P<prefix>.+?)STB(?P<room>\d{1,2})$"), "STB{room}"),
+    # TC — listed after UTC/ASB/STB
+    (re.compile(r"^(?P<prefix>.+?)TC(?P<room>\d{1,2})$"), "TC{room}"),
+    # ED
+    (re.compile(r"^(?P<prefix>.+?)ED(?P<room>\d{1,2})$"), "ED{room}"),
+    # BS — listed after ASB/STB
+    (re.compile(r"^(?P<prefix>.+?)BS(?P<room>\d{1,2})$"), "BS{room}"),
+    # G-rooms: the character immediately before "G" must be a letter or digit
+    # so a lone "G" prefix (if any ever appears) doesn't match.
+    (re.compile(r"^(?P<prefix>.+[A-Z\d])G(?P<room>\d{1,2})$"), "G{room}"),
 ]
-VENUE_REGEX = re.compile(r"^(" + "|".join(VENUE_PREFIXES) + r")$", re.IGNORECASE)
 
+# ---------------------------------------------------------------------------
+# Group label detection
+# ---------------------------------------------------------------------------
+# TUN embeds group labels between the unit code and the venue:
+#   "MATH 124 GR K TC 8"  →  unit="MATH124", group="GR K", room="TC8"
+#   "PHIL 210 GR X UTC-AE4" → unit="PHIL210", group="GR X", room="UTC-AE4"
+# After venue extraction the prefix ends in GR[A-Z0-9] when a group is present.
+# Observed labels: GR A, GR B, GR K, GR N, GR X, GR 1, GR F, GR M
+_GROUP_SUFFIX_RE = re.compile(r"^(?P<unit>.+?)GR(?P<group>[A-Z0-9])$")
+
+# ---------------------------------------------------------------------------
+# Cohort label parsing
+# ---------------------------------------------------------------------------
+# Row labels follow the pattern  "<PROGRAMME> Y<year>S<semester>"
+#   "BSC COMP SCI Y1S1"     → program="BSC COMP SCI", year=1, semester=1
+#   "BSC.NURSING Y2S1"      → program="BSC NURSING",  year=2, semester=1
+#   "CERT.COMP SCI Y1S2"    → program="CERT COMP SCI",year=1, semester=2
+# Dots in the programme name are treated as spaces.
+# The optional trailing (\d+) handles split/parallel sections like "Y3S1(1)" or "Y3S1(2)".
+# Those section numbers are discarded — they just mean the same cohort was too large for
+# one timetable block and was split across two; students share the same program/year/sem.
 _COHORT_RE = re.compile(
-    r"^(?P<program>.+?)\s+Y(?P<year>\d+)S(?P<sem>\d+)(?:\s*\((?P<cohort_sub>\d+)\))?$", 
-    re.IGNORECASE
+    r"^(?P<program>.+?)\s*Y(?P<year>\d+)S(?P<semester>\d+)\s*(?:\(\d+\))?\s*$",
+    re.IGNORECASE,
 )
-
-DAY_MAP = {
-    "mon": "mon", "monday": "mon",
-    "tue": "tue", "tuesday": "tue",
-    "wed": "wed", "wednesday": "wed",
-    "thu": "thu", "thursday": "thu",
-    "fri": "fri", "friday": "fri",
-    "sat": "sat", "saturday": "sat",
-    "sun": "sun", "sunday": "sun",
-}
 
 
 @dataclass
 class RawSlot:
+    """One parsed class occurrence, pre-normalisation."""
+
     cohort_label: str
     day: str
-    start_time: str
-    end_time: str
-    unit_code_raw: str
-    group: str
-    venue: str
-    room: str
+    start_time: str           # left edge hour, e.g. "9"
+    end_time: str             # right edge hour, e.g. "11"
+    unit_code_raw: str        # unit letters+digits ONLY — group already stripped
+    room_code: str | None     # full room code e.g. "UTC-AE4", "TC8", "G30"
+    group: str | None         # extracted group label e.g. "GR K", "GR A", or None
     page: int
     raw_cell_text: str
+    # Legacy fields — kept so any existing consumers don't break; both are
+    # derived from room_code and are deprecated.
+    venue: str | None = None
+    room: str | None = None
 
 
 @dataclass
@@ -81,87 +144,292 @@ class ParseResult:
     warnings: list[str] = field(default_factory=list)
 
 
-def _clean(text: str | None) -> str:
-    if not text:
-        return ""
-    return re.sub(r"[ \t]+", " ", str(text)).strip()
+def _clean_cell_text(text: str) -> str:
+    """Collapse a ragged, line-wrapped cell into a single space-joined string."""
+    return re.sub(r"\s+", " ", text.replace("\n", " ")).strip()
+
+
+def _split_unit_venue_group(despaced: str) -> tuple[str, str | None, str | None]:
+    """
+    Parse whitespace-stripped cell text into (unit_code_raw, room_code, group_label).
+
+    The function handles all TUN venue formats and extracts any embedded group
+    label (GR K, GR A, GR X …) that sits between the unit code and the venue.
+
+    Examples
+    --------
+    "MATH124GRKTC8"        → ("MATH124", "TC8",     "GR K")
+    "PHIL210GRXUTC-AE4"    → ("PHIL210", "UTC-AE4", "GR X")
+    "COSC160UTC-AC2"       → ("COSC160", "UTC-AC2", None)
+    "LISK101TC5"           → ("LISK101", "TC5",     None)
+    "NURS212ASB2"          → ("NURS212", "ASB2",    None)
+    "ACMT212G30"           → ("ACMT212", "G30",     None)
+    "MATH322GRBUTC5"       → ("MATH322", "UTC5",    "GR B")
+    "CHEM436GRASTB1"       → ("CHEM436", "STB1",    "GR A")
+    "NURS133"              → ("NURS133", None,      None)  # bare unit, no venue
+    """
+    prefix_part = despaced
+    room_code: str | None = None
+
+    # Try each venue pattern in specificity order
+    for pattern, template in _VENUE_SPECS:
+        m = pattern.match(despaced)
+        if m:
+            prefix_part = m.group("prefix")
+            room_code = template.format(room=m.group("room"))
+            break
+
+    # Extract group label from the unit+group prefix (e.g. "MATH124GRK" → unit="MATH124", group="GR K")
+    group_label: str | None = None
+    unit_part = prefix_part
+    gm = _GROUP_SUFFIX_RE.match(prefix_part)
+    if gm:
+        unit_part = gm.group("unit")
+        group_label = f"GR {gm.group('group')}"  # normalise to "GR K" spacing
+
+    return unit_part, room_code, group_label
+
+
+def parse_cohort_label(label: str) -> tuple[str, int, int]:
+    """
+    Parse a TUN cohort row label into (program_name, year_of_study, semester).
+
+    Examples
+    --------
+    "BSC COMP SCI Y1S1"     → ("BSC COMP SCI",  1, 1)
+    "BSC.NURSING Y2S1"      → ("BSC NURSING",   2, 1)
+    "CERT.COMP SCI Y1S2"    → ("CERT COMP SCI", 1, 2)
+    "B.LAW Y1S1"            → ("B LAW",         1, 1)
+    "BSC GENERAL Y4S1"      → ("BSC GENERAL",   4, 1)
+
+    Falls back to (label, 1, 1) if the pattern is not recognised.
+    """
+    m = _COHORT_RE.match(label.strip())
+    if not m:
+        return label.strip(), 1, 1
+    # Replace dots with spaces, collapse multiple spaces
+    program = re.sub(r"\.", " ", m.group("program")).strip()
+    program = re.sub(r"\s+", " ", program)
+    year = int(m.group("year"))
+    semester = int(m.group("semester"))
+    return program, year, semester
 
 
 def normalise_unit_code(raw_unit: str) -> str:
     """
-    Exported helper expected across the upload pipeline.
-    Strips non-alphanumeric characters and group noise.
+    Strip everything except uppercase letters and digits.
+
+    Master-timetable unit codes are stored WITHOUT internal spaces
+    (e.g. "COSC328", not "COSC 328").  The PDF's ragged line-wrapping
+    means the raw fragment already arrives without spaces by the time
+    this is called; this function additionally uppercases and strips stray
+    non-alphanumeric noise so downstream matching against portal codes
+    (which use "COSC 328") works once their spaces are also stripped.
+
+    NOTE: call this AFTER _split_unit_venue_group so that the group suffix
+    (GR K etc.) has already been removed from raw_unit.
     """
-    if not raw_unit:
-        return ""
-    cleaned = re.sub(GROUP_RE, "", raw_unit)
-    return re.sub(r"[^A-Z0-9]", "", cleaned.upper())
+    return re.sub(r"[^A-Z0-9]", "", raw_unit.upper())
 
 
-def parse_unit_and_group(text: str) -> tuple[str, str]:
+def _build_column_maps(header_day_row: list, header_hour_row: list) -> tuple[dict, dict]:
     """
-    Extracts the normalized unit code and specific group from text.
-    Example:
-      'MATH 124 GR.M' -> ('MATH124', 'GR_M')
-      'PHYS 121 GRA'   -> ('PHYS121', 'GR_A')
-      'COSC 103'       -> ('COSC103', 'MAIN')
+    Returns:
+      col_to_day: {col_index: "Monday"}
+      col_to_hour_label: {col_index: "7-8"}
+    Day header cells are merged (None-filled) across their 12-hour block,
+    so we forward-fill the last seen day label.
     """
-    cleaned = text.strip()
-    group = "MAIN"
+    col_to_day: dict[int, str] = {}
+    current_day = None
+    for idx, val in enumerate(header_day_row):
+        if idx == LABEL_COL:
+            continue
+        if val:
+            current_day = val.strip()
+        if current_day:
+            col_to_day[idx] = current_day
 
-    m = GROUP_RE.search(cleaned)
-    if m:
-        extracted = (m.group(1) or m.group(2) or "").upper()
-        group = f"GR_{extracted}"
-        cleaned = cleaned[:m.start()] + cleaned[m.end():]
+    col_to_hour_label: dict[int, str] = {}
+    for idx, val in enumerate(header_hour_row):
+        if idx == LABEL_COL:
+            continue
+        if val:
+            col_to_hour_label[idx] = val.strip()
 
-    unit_code = re.sub(r"[^A-Z0-9]", "", cleaned.upper())
-    return unit_code, group
-
-
-def _is_likely_venue(text: str) -> bool:
-    cleaned = text.strip().upper()
-    return bool(VENUE_REGEX.match(cleaned)) or any(
-        cleaned.startswith(p) for p in ["UTC", "ASB", "TC", "ED", "BS", "STB", "ADM"]
-    ) or bool(re.match(r"^G\s*\d{1,3}$", cleaned))
-
-
-def _extract_day_col_map(header_row: list) -> dict[int, str]:
-    col_to_day = {}
-    current_day = "Monday"
-    for idx, cell in enumerate(header_row):
-        txt = _clean(cell).capitalize()
-        for d in DAYS:
-            if d.lower() in txt.lower():
-                current_day = d
-                break
-        col_to_day[idx] = current_day
-    return col_to_day
+    return col_to_day, col_to_hour_label
 
 
-def _approx_time_for_col(col_idx: int) -> tuple[str, str]:
-    # Subtract 1 to account for the cohort/label column at index 0,
-    # aligning column indices correctly with 7:00 AM start time slots.
-    adjusted_col = max(0, col_idx - 1)
-    step = (adjusted_col % 12)
-    start_h = 7 + step
-    end_h = min(start_h + 2, 19)
-    return f"{start_h:02d}:00", f"{end_h:02d}:00"
+def _hour_bounds(label: str) -> tuple[str, str]:
+    """'9-10' -> ('9', '10')."""
+    start, end = label.split("-")
+    return start.strip(), end.strip()
 
 
-def _split_cell_lines(cell_val: str | None) -> list[str]:
-    if not cell_val:
-        return []
-    lines = [l.strip() for l in str(cell_val).split("\n") if l.strip()]
-    return lines
+def _is_header_row(row: list) -> bool:
+    return any(cell and cell.strip() in DAYS for cell in row)
 
 
 def parse_pdf(path: str) -> ParseResult:
+    """
+    Parse a TUN master-timetable PDF into RawSlot rows.
+
+    Header (day/hour) state is carried across tables and pages: only
+    tables that actually start with a day-name row update the column
+    mapping, everything else is treated as cohort data using whatever
+    header was last seen. See module docstring.
+    
+    IMPORTANT: For large PDFs, use parse_pdf_streaming() instead for
+    memory efficiency.
+    """
     result = ParseResult()
-    current_day_map = {}
+    col_to_day: dict[int, str] = {}
+    col_to_hour_label: dict[int, str] = {}
 
     with pdfplumber.open(path) as pdf:
-        for page_idx, page in enumerate(pdf.pages, start=1):
+        for page_index, page in enumerate(pdf.pages, start=1):
+            tables = page.find_tables()
+            if not tables:
+                continue
+
+            # Ensure top-to-bottom reading order within the page.
+            tables = sorted(tables, key=lambda t: t.bbox[1])
+
+            for table in tables:
+                data = table.extract()
+                if not data:
+                    continue
+
+                if _is_header_row(data[0]):
+                    if len(data) < 2:
+                        result.warnings.append(
+                            f"page {page_index}: header table with no hour-label row"
+                        )
+                        continue
+                    header_day_row, header_hour_row = data[0], data[1]
+                    col_to_day, col_to_hour_label = _build_column_maps(header_day_row, header_hour_row)
+                    data_rows = data[2:]
+                else:
+                    data_rows = data
+
+                if not col_to_day:
+                    result.warnings.append(
+                        f"page {page_index}: cohort data encountered before any header "
+                        f"was parsed; skipping table"
+                    )
+                    continue
+
+                for row in data_rows:
+                    if not row or not row[0]:
+                        continue
+                    cohort_label = _clean_cell_text(row[0])
+                    if not cohort_label:
+                        continue
+
+                    col = 1
+                    n_cols = len(row)
+                    while col < n_cols:
+                        cell = row[col]
+
+                        if cell is None:
+                            # continuation of a merged cell handled when we
+                            # first encountered its left edge; skip.
+                            col += 1
+                            continue
+
+                        text = _clean_cell_text(cell) if cell else ""
+                        if not text:
+                            col += 1
+                            continue
+
+                        # Determine merge span: consecutive following
+                        # columns that are None AND still within the same
+                        # day block belong to this class.
+                        span_end = col
+                        day = col_to_day.get(col)
+                        while (
+                            span_end + 1 < n_cols
+                            and row[span_end + 1] is None
+                            and col_to_day.get(span_end + 1) == day
+                        ):
+                            span_end += 1
+
+                        start_label = col_to_hour_label.get(col)
+                        end_label = col_to_hour_label.get(span_end)
+                        if not (day and start_label and end_label):
+                            result.warnings.append(
+                                f"page {page_index}: could not resolve day/time for "
+                                f"cohort={cohort_label!r} col={col} text={text!r}"
+                            )
+                            col = span_end + 1
+                            continue
+
+                        start_time, _ = _hour_bounds(start_label)
+                        _, end_time = _hour_bounds(end_label)
+
+                        despaced = re.sub(r"\s+", "", text)
+                        # Extract unit code, room code, and group label.
+                        # Heuristic: if no room was found, peek at the next
+                        # cell — a lone digit there is often the room number
+                        # split across cells (e.g. "...BS" + "1").
+                        unit_raw, room_code, group = _split_unit_venue_group(despaced)
+                        if room_code is None and span_end + 1 < n_cols:
+                            peek = row[span_end + 1]
+                            if peek and re.fullmatch(r"\d{1,3}", peek.strip()):
+                                despaced2 = despaced + peek.strip()
+                                unit_raw2, room_code2, group2 = _split_unit_venue_group(despaced2)
+                                if room_code2:
+                                    unit_raw, room_code, group = unit_raw2, room_code2, group2
+                                    span_end += 1  # consume the stray digit cell
+
+                        result.slots.append(
+                            RawSlot(
+                                cohort_label=cohort_label,
+                                day=day,
+                                start_time=start_time,
+                                end_time=end_time,
+                                unit_code_raw=unit_raw,
+                                room_code=room_code,
+                                group=group,
+                                page=page_index,
+                                raw_cell_text=text,
+                            )
+                        )
+                        if room_code is None:
+                            result.warnings.append(
+                                f"page {page_index}: no room parsed for "
+                                f"cohort={cohort_label!r} text={text!r} (unit only)"
+                            )
+
+                        col = span_end + 1
+
+    return result
+
+
+def parse_pdf_streaming(path: str, chunk_callback=None, chunk_size: int = 50):
+    """
+    Parse a TUN master-timetable PDF into RawSlot rows using a streaming/chunking
+    approach. This is MUCH more memory-efficient for large PDFs.
+    
+    Args:
+        path: Path to PDF file
+        chunk_callback: Optional callback function(slots: list[RawSlot], page: int, table: int) 
+                       called for each batch of slots. If provided, allows processing
+                       slots without keeping all in memory.
+        chunk_size: Number of slots to accumulate before calling callback (default 50)
+        
+    Yields:
+        Tuple of (RawSlot list, page index, table index) if no callback provided
+        Returns full ParseResult with warnings if callback is provided
+    """
+    slots = []
+    warnings = []
+    col_to_day: dict[int, str] = {}
+    col_to_hour_label: dict[int, str] = {}
+    table_counter = 0
+
+    with pdfplumber.open(path) as pdf:
+        for page_index, page in enumerate(pdf.pages, start=1):
             tables = page.find_tables()
             if not tables:
                 continue
@@ -169,145 +437,186 @@ def parse_pdf(path: str) -> ParseResult:
             tables = sorted(tables, key=lambda t: t.bbox[1])
 
             for table in tables:
+                table_counter += 1
                 data = table.extract()
-                if not data or len(data) < 2:
+                if not data:
                     continue
 
-                start_row = 0
-                row0_str = " ".join([_clean(c) for c in data[0] if c])
-                if any(d.lower() in row0_str.lower() for d in DAYS):
-                    current_day_map = _extract_day_col_map(data[0])
-                    start_row = 2 if len(data) > 2 else 1
+                if _is_header_row(data[0]):
+                    if len(data) < 2:
+                        warnings.append(
+                            f"page {page_index}: header table #{table_counter} "
+                            f"with no hour-label row"
+                        )
+                        continue
+                    header_day_row, header_hour_row = data[0], data[1]
+                    col_to_day, col_to_hour_label = _build_column_maps(
+                        header_day_row, header_hour_row
+                    )
+                    data_rows = data[2:]
+                else:
+                    data_rows = data
 
-                if not current_day_map:
+                if not col_to_day:
+                    warnings.append(
+                        f"page {page_index}: cohort data encountered before any header "
+                        f"was parsed; skipping table #{table_counter}"
+                    )
                     continue
 
-                r = start_row
-                num_rows = len(data)
-
-                while r < num_rows:
-                    row_data = data[r]
-                    if not row_data or not any(row_data):
-                        r += 1
+                for row in data_rows:
+                    if not row or not row[0]:
+                        continue
+                    cohort_label = _clean_cell_text(row[0])
+                    if not cohort_label:
                         continue
 
-                    raw_label = row_data[0]
-                    cohort_lines = _split_cell_lines(raw_label)
-                    if not cohort_lines:
-                        r += 1
-                        continue
+                    col = 1
+                    n_cols = len(row)
+                    while col < n_cols:
+                        cell = row[col]
 
-                    # Look ahead for venue row
-                    venue_row = None
-                    if r + 1 < num_rows:
-                        next_row = data[r + 1]
-                        next_row_label = _clean(next_row[0]) if next_row else ""
-                        if not next_row_label:
-                            venue_row = next_row
-
-                    n_cols = len(row_data)
-                    for c in range(1, n_cols):
-                        cell_raw = row_data[c]
-                        if not cell_raw:
+                        if cell is None:
+                            col += 1
                             continue
 
-                        unit_lines = _split_cell_lines(cell_raw)
-                        v_lines = _split_cell_lines(venue_row[c]) if (venue_row and c < len(venue_row)) else []
+                        text = _clean_cell_text(cell) if cell else ""
+                        if not text:
+                            col += 1
+                            continue
 
-                        if not v_lines and len(unit_lines) >= 2:
-                            if _is_likely_venue(unit_lines[-1]):
-                                v_lines = [unit_lines.pop()]
+                        span_end = col
+                        day = col_to_day.get(col)
+                        while (
+                            span_end + 1 < n_cols
+                            and row[span_end + 1] is None
+                            and col_to_day.get(span_end + 1) == day
+                        ):
+                            span_end += 1
 
-                        day_str = current_day_map.get(c, "Monday")
-                        st_time, end_time = _approx_time_for_col(c)
+                        start_label = col_to_hour_label.get(col)
+                        end_label = col_to_hour_label.get(span_end)
+                        if not (day and start_label and end_label):
+                            warnings.append(
+                                f"page {page_index}: could not resolve day/time for "
+                                f"cohort={cohort_label!r} col={col} text={text!r}"
+                            )
+                            col = span_end + 1
+                            continue
 
-                        max_items = max(len(unit_lines), 1)
-                        for i in range(max_items):
-                            u_text = unit_lines[i] if i < len(unit_lines) else (unit_lines[0] if unit_lines else "")
-                            if not u_text or _is_likely_venue(u_text):
-                                continue
+                        start_time, _ = _hour_bounds(start_label)
+                        _, end_time = _hour_bounds(end_label)
 
-                            venue_item = "TBA"
-                            if i < len(v_lines):
-                                venue_item = v_lines[i]
-                            elif v_lines:
-                                venue_item = v_lines[-1]
+                        despaced = re.sub(r"\s+", "", text)
+                        unit_raw, room_code, group = _split_unit_venue_group(despaced)
+                        if room_code is None and span_end + 1 < n_cols:
+                            peek = row[span_end + 1]
+                            if peek and re.fullmatch(r"\d{1,3}", peek.strip()):
+                                despaced2 = despaced + peek.strip()
+                                unit_raw2, room_code2, group2 = _split_unit_venue_group(despaced2)
+                                if room_code2:
+                                    unit_raw, room_code, group = unit_raw2, room_code2, group2
+                                    span_end += 1
 
-                            cohort_item = cohort_lines[i] if i < len(cohort_lines) else cohort_lines[0]
+                        raw_slot = RawSlot(
+                            cohort_label=cohort_label,
+                            day=day,
+                            start_time=start_time,
+                            end_time=end_time,
+                            unit_code_raw=unit_raw,
+                            room_code=room_code,
+                            group=group,
+                            page=page_index,
+                            raw_cell_text=text,
+                        )
+                        slots.append(raw_slot)
 
-                            clean_unit, group = parse_unit_and_group(u_text)
-                            if not clean_unit or len(clean_unit) < 3:
-                                continue
-
-                            result.slots.append(
-                                RawSlot(
-                                    cohort_label=cohort_item,
-                                    day=day_str,
-                                    start_time=st_time.split(":")[0],
-                                    end_time=end_time.split(":")[0],
-                                    unit_code_raw=clean_unit,
-                                    group=group,
-                                    venue=venue_item,
-                                    room=venue_item,
-                                    page=page_idx,
-                                    raw_cell_text=f"{clean_unit} [{group}] at {venue_item}",
-                                )
+                        if room_code is None:
+                            warnings.append(
+                                f"page {page_index}: no room parsed for "
+                                f"cohort={cohort_label!r} text={text!r} (unit only)"
                             )
 
-                    if venue_row is not None:
-                        r += 2
-                    else:
-                        r += 1
+                        col = span_end + 1
 
-    return result
+                        # Flush batch if reached chunk_size
+                        if len(slots) >= chunk_size:
+                            if chunk_callback:
+                                chunk_callback(slots[:], page_index, table_counter)
+                            else:
+                                yield slots[:], page_index, table_counter
+                            slots = []
+
+    # Final flush
+    if slots:
+        if chunk_callback:
+            chunk_callback(slots, page_index, table_counter)
+        else:
+            yield slots, page_index, table_counter
+
+    # Return warnings via callback or as generator final message
+    if chunk_callback:
+        return ParseResult(slots=[], warnings=warnings)
+    else:
+        yield [], -1, -1  # Sentinel to indicate end
+        return ParseResult(slots=[], warnings=warnings)
 
 
 def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027") -> list[dict]:
+    """
+    Convert RawSlot rows into plain dicts with keys matching what
+    TimetablePersistenceService.save_rows() and the mapper layer expect.
+
+    Key contract (mirrors the Excel flat-format columns):
+        program_code        — parsed from cohort_label (e.g. "BSC COMP SCI")
+        year_of_study       — parsed from cohort_label Y# (e.g. 1)
+        semester            — parsed from cohort_label S# (e.g. 1)
+        academic_year       — passed in (e.g. "2026/2027")
+        unit_code           — clean unit code, group suffix already removed
+        room_code           — full room code (e.g. "UTC-AE4", "TC8", "G30")
+        class_group         — group label ("GR K", "GR A") or "MAIN"
+        day_of_week         — full day name ("Monday" …); persistence truncates to 3
+        start_time          — "HH:00"
+        end_time            — "HH:00"
+        lecturer_university_id — blank (PDF format carries no lecturer data)
+        cohort_label        — raw label, kept for debugging
+        source_page         — PDF page number, kept for debugging
+    """
     out = []
     for s in result.slots:
-        program_code = s.cohort_label
-        year_of_study = 1
-        semester = 1
-        class_group = s.group
-
-        m = _COHORT_RE.match(s.cohort_label.strip())
-        if m:
-            program_code = m.group("program").strip()
-            year_of_study = int(m.group("year"))
-            semester = int(m.group("sem"))
-            if class_group == "MAIN" and m.group("cohort_sub"):
-                class_group = f"GR_{m.group('cohort_sub')}"
-
-        unit_code = normalise_unit_code(s.unit_code_raw)
-        if not unit_code or len(unit_code) < 3:
-            continue
-
-        raw_day = str(s.day or "").strip().lower()
-        code_day = DAY_MAP.get(raw_day, raw_day[:3])
-
-        try:
-            st_int = int(s.start_time)
-            et_int = int(s.end_time)
-            start_str = f"{st_int:02d}:00"
-            end_str = f"{et_int:02d}:00"
-        except (ValueError, TypeError):
-            start_str = "07:00"
-            end_str = "09:00"
-
-        room_str = s.venue[:20] if s.venue else "TBA"
-
-        out.append({
-            "academic_year": academic_year,
-            "semester": semester,
-            "year_of_study": year_of_study,
-            "program_code": program_code[:64],
-            "unit_code": unit_code[:20],
-            "class_group": class_group,
-            "day_of_week": code_day,
-            "start_time": start_str,
-            "end_time": end_str,
-            "room_code": room_str,
-            "lecturer_university_id": "",
-            "lecturer_name_text": "",
-        })
+        program_name, year, semester = parse_cohort_label(s.cohort_label)
+        out.append(
+            {
+                # ── identity / scheduling ──────────────────────────────
+                "program_code": program_name,
+                "year_of_study": year,
+                "semester": semester,
+                "academic_year": academic_year,
+                "unit_code": normalise_unit_code(s.unit_code_raw),
+                "room_code": s.room_code or "",
+                "class_group": s.group or "MAIN",
+                "day_of_week": s.day,          # "Monday" etc.
+                "start_time": f"{s.start_time}:00",
+                "end_time": f"{s.end_time}:00",
+                "lecturer_university_id": "",
+                # ── debug metadata ─────────────────────────────────────
+                "cohort_label": s.cohort_label,
+                "source_page": s.page,
+            }
+        )
     return out
+
+
+if __name__ == "__main__":
+    import sys
+    import json
+
+    target = sys.argv[1]
+    res = parse_pdf(target)
+    slots = to_timetable_slot_dicts(res)
+    print(f"Parsed {len(slots)} slots from {target}")
+    print(f"Warnings: {len(res.warnings)}")
+    for w in res.warnings[:20]:
+        print(" -", w)
+    with open("parsed_slots.json", "w") as f:
+        json.dump(slots, f, indent=2)

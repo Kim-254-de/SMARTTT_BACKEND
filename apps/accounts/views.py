@@ -96,6 +96,7 @@ class ProfileView(APIView):
     def get(self, request):
         return Response(UserSerializer(request.user).data)
 
+    @transaction.atomic
     def patch(self, request):
         user = request.user
         full_name = request.data.get("full_name")
@@ -122,7 +123,76 @@ class ProfileView(APIView):
                 )
             user.university_id = admission_number
         user.save()
+
+        # ── Persist timetable stream preferences onto the Student profile ──────
+        # Flutter sends: program_id, year_of_study, timetable_group, combination
+        # These live on the Student model, not the User model, so we must update
+        # (or create) the student profile here.
+        pref_fields = {"program_id", "year_of_study", "timetable_group", "combination"}
+        if pref_fields & set(request.data.keys()):
+            self._update_student_preferences(user, request.data)
+
         return Response(UserSerializer(user).data)
+
+    def _update_student_preferences(self, user, data: dict) -> None:
+        """
+        Update (or create) the student profile with timetable stream preferences.
+        Safe to call for non-student users — does nothing if no program can be resolved.
+        """
+        from apps.programs.models import Program
+        from apps.students.models import Student
+        import datetime
+
+        program_id = data.get("program_id")
+        program = None
+        if program_id:
+            try:
+                program = Program.objects.select_related("department").get(pk=program_id)
+            except (Program.DoesNotExist, Exception):
+                program = None
+
+        year_of_study = data.get("year_of_study")
+        try:
+            year_of_study = int(year_of_study) if year_of_study is not None else None
+        except (TypeError, ValueError):
+            year_of_study = None
+
+        timetable_group = data.get("timetable_group") or ""
+        combination = data.get("combination") or ""
+
+        student = getattr(user, "student_profile", None)
+
+        if student is None:
+            # First-time preference save: create a Student profile.
+            # program is required on the model, so skip creation without it.
+            if not program:
+                return
+            Student.objects.create(
+                user=user,
+                department=program.department,
+                program=program,
+                current_study_year=year_of_study or 1,
+                timetable_group=timetable_group,
+                combination=combination,
+                admission_year=datetime.date.today().year,
+            )
+        else:
+            update_fields = []
+            if program:
+                student.program = program
+                student.department = program.department
+                update_fields += ["program", "department"]
+            if year_of_study is not None:
+                student.current_study_year = year_of_study
+                update_fields.append("current_study_year")
+            if "timetable_group" in data:
+                student.timetable_group = timetable_group
+                update_fields.append("timetable_group")
+            if "combination" in data:
+                student.combination = combination
+                update_fields.append("combination")
+            if update_fields:
+                student.save(update_fields=update_fields)
 
 
 class GoogleAuthView(APIView):
