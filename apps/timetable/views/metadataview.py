@@ -28,7 +28,7 @@ class TimetableMetadataView(APIView):
     def get(self, request):
         current_term = AcademicTerm.objects.filter(is_current=True).first()
         if not current_term:
-            return Response({"courses": [], "years": [], "groups": []}, status=200)
+            return Response({"courses": [], "years": [], "streams": []}, status=200)
 
         slots = TimetableSlot.objects.filter(term=current_term).select_related('program')
 
@@ -78,36 +78,34 @@ class TimetableMetadataView(APIView):
         if year_of_study:
             filtered_slots = filtered_slots.filter(year_of_study=year_of_study)
 
-        # ── 3. Scoped Groups with Smart Fallback ──────────────────────────
-        raw_groups = list(filtered_slots.values_list('class_group', flat=True))
-        cleaned_groups = [g.strip() for g in raw_groups if g and g.strip()]
-        unique_groups = set(cleaned_groups)
-
-        if "MAIN" in unique_groups and len(unique_groups) > 1:
-            main_count = cleaned_groups.count("MAIN")
-            total_count = len(cleaned_groups)
-            if main_count / total_count > 0.3:
-                groups = ["MAIN"]
-            else:
-                groups = sorted(unique_groups)
-        elif not unique_groups:
-            groups = ["MAIN"]
-        else:
-            groups = sorted(unique_groups)
+        # Distinct sub-streams for this program+year, e.g. the "1"/"2" in
+        # "BED.MATH/CHEM Y3S1(1)" / "...(2)". Unlike class_group (which
+        # varies per shared unit pool within a single stream - see
+        # TimetableSlot.stream docstring), stream identifies the single
+        # physical row/class a student actually belongs to, so it's what
+        # the student needs to pick to disambiguate their whole timetable.
+        raw_streams = list(filtered_slots.values_list('stream', flat=True))
+        streams = sorted({s.strip() for s in raw_streams if s and s.strip()})
 
         response = {
             "semester": current_term.semester,
             "academic_year": current_term.academic_year,
             "courses": courses,
             "years": years,
-            "groups": groups,
+            # "streams" is empty when this program+year has only one class
+            # (no disambiguation needed) - the frontend should skip the
+            # picker in that case rather than showing an empty dropdown.
+            "streams": streams,
         }
 
         # ── Resolve the concrete Program row to actually save on the student.
         #    A program split across duplicate rows means the "right" row
         #    depends on which one has slots for the year the student picked —
         #    pick whichever candidate has the most matching slots for that
-        #    year (ties broken by lowest id, for stability). ──
+        #    year (ties broken by lowest id, for stability). The frontend
+        #    saves this (not the raw course id it already holds) back to
+        #    ProfileView.patch as program_id, so student preferences link to
+        #    the exact Program row the master timetable upload created. ──
         if selected_program_ids and year_of_study:
             counts = defaultdict(int)
             qs = slots.filter(program_id__in=selected_program_ids).values_list('program_id', 'year_of_study')
