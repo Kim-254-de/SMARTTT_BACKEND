@@ -81,9 +81,9 @@ def generate_for_user(user) -> dict:
 
     slot_filter = Q(term=term, unit_id__in=unit_ids)
     if student and student.program_id:
-        slot_filter &= Q(program_id=student.program_id) | Q(program__isnull=True)
+        slot_filter &= Q(program_id=student.program_id)
     if student and student.current_study_year:
-        slot_filter &= Q(year_of_study=student.current_study_year) | Q(program__isnull=True)
+        slot_filter &= Q(year_of_study=student.current_study_year)
 
     raw_slots = list(
         TimetableSlot.objects.select_related(

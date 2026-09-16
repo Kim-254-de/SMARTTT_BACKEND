@@ -267,7 +267,9 @@ class TimetableFilterService:
         from django.db.models import Q
         from apps.enrollments.models import StudentEnrollment
 
-        # Base filters matching the student's academic profile
+        if not student:
+            return TimetableSession.objects.none()
+
         profile_filter = Q(
             academic_year=academic_year,
             semester=semester,
@@ -275,7 +277,6 @@ class TimetableFilterService:
             program=student.program
         )
 
-        # Optional group/stream filtering
         if student.timetable_group:
             group_val = student.timetable_group.strip()
             group_clean = re.sub(r'[^A-Z0-9]', '', group_val.upper())
@@ -287,40 +288,29 @@ class TimetableFilterService:
                 Q(student_group__iexact="")
             )
         else:
-            group_filter = Q()
+            group_filter = Q(student_group__iexact="MAIN") | Q(student_group__isnull=True) | Q(student_group__iexact="")
 
-        # 1. Check for explicitly enrolled units first (from manual or portal sync)
-        enrollments = StudentEnrollment.objects.filter(
+        unit_ids = list(StudentEnrollment.objects.filter(
             student=student,
             term__academic_year=academic_year,
             term__semester=semester,
             status=StudentEnrollment.Status.ENROLLED
-        )
-        
-        if enrollments.exists():
-            unit_ids = enrollments.values_list("unit_id", flat=True)
-            sessions = TimetableSession.objects.filter(
-                profile_filter,
-                unit_id__in=unit_ids
-            ).filter(group_filter)
-            
-            if sessions.exists():
-                return sessions.order_by("day_of_week", "time_slot__start_time")
+        ).values_list("unit_id", flat=True))
 
-        # 2. Fallback to curriculum-based filtering if no explicit enrollments match
-        sessions = TimetableSessionSelector.get_sessions_by_program(
-            program_id=str(student.program.id),
-            academic_year=academic_year,
-            study_year=student.current_study_year,
-            semester=semester,
-        )
+        if not unit_ids:
+            curriculum = student.get_current_curriculum()
+            if curriculum:
+                unit_ids = list(curriculum.curriculum_units.values_list("unit_id", flat=True))
 
-        curriculum = student.get_current_curriculum()
-        if curriculum:
-            curriculum_unit_ids = curriculum.curriculum_units.values_list("unit_id", flat=True)
-            sessions = sessions.filter(unit_id__in=curriculum_unit_ids)
+        if not unit_ids:
+            return TimetableSession.objects.none()
 
-        return sessions.filter(group_filter).order_by("day_of_week", "time_slot__start_time")
+        sessions = TimetableSession.objects.filter(
+            profile_filter,
+            unit_id__in=unit_ids
+        ).filter(group_filter)
+
+        return sessions.order_by("day_of_week", "time_slot__start_time")
 
     @staticmethod
     def get_filtered_timetable_by_day(sessions, day_of_week: str):
