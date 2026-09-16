@@ -165,6 +165,7 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
             "class_group",
             "upload_batch",
             "created_at",
+            "curriculum_unit_display",
 
             # Frontend-friendly aliases
             "subject",
