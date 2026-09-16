@@ -115,6 +115,15 @@ class TimetableSlot(BaseModel):
 
     class Meta:
         ordering = ["term", "day_of_week", "start_time"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=[
+                    "term", "program", "unit", "year_of_study", "day_of_week",
+                    "start_time", "end_time", "room", "class_group", "stream",
+                ],
+                name="unique_timetable_slot",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.unit.code} {self.day_of_week} {self.start_time}"

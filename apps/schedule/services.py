@@ -108,19 +108,6 @@ def generate_for_user(user) -> dict:
         .order_by("_day_sort", "start_time")
     )
 
-    if student and student.timetable_group:
-        groups_per_unit: dict = {}
-        for slot in raw_slots:
-            groups_per_unit.setdefault(slot.unit_id, set()).add(slot.class_group or "MAIN")
-
-        def _matches_group(slot: TimetableSlot) -> bool:
-            unit_groups = groups_per_unit.get(slot.unit_id, set())
-            if len(unit_groups) <= 1:
-                return True
-            return (slot.class_group or "MAIN") == student.timetable_group
-
-        raw_slots = [s for s in raw_slots if _matches_group(s)]
-
     # ── 3b. DEDUPLICATION: Purge duplicate slots from repeated file uploads ─────
     seen_signatures = set()
     slots: list[TimetableSlot] = []

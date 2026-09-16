@@ -15,7 +15,6 @@ from __future__ import annotations
 import re
 import logging
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Tuple
 
 import pdfplumber
 
@@ -44,6 +43,9 @@ VENUE_PREFIXES = [
     r"G\s*\d+",        # G1, G2, G14, G30
 ]
 VENUE_REGEX = re.compile(r"^(" + "|".join(VENUE_PREFIXES) + r")$", re.IGNORECASE)
+# Unanchored at the end, used only as a fallback when the whole line isn't a
+# clean venue - see _extract_venue_prefix.
+_VENUE_PREFIX_RE = re.compile(r"^(" + "|".join(VENUE_PREFIXES) + r")", re.IGNORECASE)
 
 _COHORT_RE = re.compile(
     r"^(?P<program>.+?)\s+Y(?P<year>\d+)S(?P<sem>\d+)(?:\s*\((?P<cohort_sub>\d+)\))?$", 
@@ -133,24 +135,64 @@ def _is_likely_venue(text: str) -> bool:
     return bool(VENUE_REGEX.match(cleaned)) or bool(re.match(r"^G\s*\d{1,3}$", cleaned))
 
 
-def _extract_day_col_map(header_row: list) -> dict[int, str]:
-    col_to_day = {}
-    current_day = "Monday"
-    for idx, cell in enumerate(header_row):
-        txt = _clean(cell).capitalize()
-        for d in DAYS:
-            if d.lower() in txt.lower():
-                current_day = d
-                break
-        col_to_day[idx] = current_day
-    return col_to_day
+def _extract_venue_prefix(text: str) -> str | None:
+    """
+    Fallback for cells (seen on the certificate-programme pages) where the
+    venue line carries stray trailing noise from a table-extraction glitch,
+    e.g. "G 12 1" instead of "G 12". Only trusted when what's left after the
+    venue prefix is short digit/space noise, not real unit or group text -
+    otherwise a line that never was a venue (e.g. "GR 12A") could be
+    misread as one.
+    """
+    cleaned = text.strip().upper()
+    m = _VENUE_PREFIX_RE.match(cleaned)
+    if not m:
+        return None
+    remainder = cleaned[m.end():].strip()
+    if remainder and not re.fullmatch(r"[\d\s]{1,3}", remainder):
+        return None
+    return m.group(1).strip()
 
 
-def _approx_time_for_col(col_idx: int) -> tuple[str, str]:
-    step = (col_idx % 12)
-    start_h = 7 + step
-    end_h = min(start_h + 2, 19)
-    return f"{start_h:02d}:00", f"{end_h:02d}:00"
+def _is_header_row(row: list) -> bool:
+    """A day-band row, e.g. ['', 'Monday', None, ..., 'Tuesday', ...]."""
+    return any(cell and str(cell).strip() in DAYS for cell in row)
+
+
+def _build_column_maps(day_row: list, hour_row: list) -> tuple[dict[int, str], dict[int, str]]:
+    """
+    Turn the two header rows into column -> day and column -> hour-label maps.
+    Day cells are merged (None-filled) across their 12-hour block in the
+    source PDF, so forward-fill the last seen day label; the hour row has
+    one real label per column ("7-\\n8", "8-\\n9", ...), no fill needed.
+    """
+    col_to_day: dict[int, str] = {}
+    current_day: str | None = None
+    for idx, cell in enumerate(day_row):
+        if idx == LABEL_COL:
+            continue
+        txt = _clean(cell)
+        if txt:
+            current_day = txt
+        if current_day:
+            col_to_day[idx] = current_day
+
+    col_to_hour_label: dict[int, str] = {}
+    for idx, cell in enumerate(hour_row):
+        if idx == LABEL_COL:
+            continue
+        txt = _clean(cell)
+        if txt:
+            col_to_hour_label[idx] = txt
+
+    return col_to_day, col_to_hour_label
+
+
+def _hour_bounds(label: str) -> tuple[str, str]:
+    """'7-\\n8' -> ('7', '8'); the source PDF wraps the label at the hyphen."""
+    flat = re.sub(r"\s+", "", label)
+    start, end = flat.split("-", 1)
+    return start.strip(), end.strip()
 
 
 def _split_cell_lines(cell_val: str | None) -> list[str]:
@@ -158,6 +200,36 @@ def _split_cell_lines(cell_val: str | None) -> list[str]:
         return []
     lines = [l.strip() for l in str(cell_val).split("\n") if l.strip()]
     return lines
+
+
+_ALPHA_ONLY_RE = re.compile(r"^[A-Z]{2,6}$", re.IGNORECASE)
+_STARTS_WITH_DIGIT_RE = re.compile(r"^\d")
+
+
+def _merge_split_unit_code_lines(lines: list[str]) -> list[str]:
+    """
+    A common cell-wrap pattern splits the unit code's letters onto their own
+    line, e.g. ["GEOG", "144 GR D", "UTC 7"] or ["CHTM", "0020", "G 12"]
+    instead of ["GEOG 144 GR D", "UTC 7"]. Detect a bare-letters line
+    directly followed by a line that starts with the code's digits (which
+    may carry a trailing " GR X" group marker) and join the two - otherwise
+    the letters and digits each get treated as their own bogus "unit".
+    """
+    merged = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if (
+            _ALPHA_ONLY_RE.match(line)
+            and i + 1 < len(lines)
+            and _STARTS_WITH_DIGIT_RE.match(lines[i + 1])
+        ):
+            merged.append(f"{line}{lines[i + 1]}")
+            i += 2
+        else:
+            merged.append(line)
+            i += 1
+    return merged
 
 
 # Matches a line ending in a bare "GR"/"GR."/"GROUP" marker with nothing
@@ -196,7 +268,8 @@ def _merge_split_group_lines(lines: list[str]) -> list[str]:
 
 def parse_pdf(path: str) -> ParseResult:
     result = ParseResult()
-    current_day_map = {}
+    col_to_day: dict[int, str] = {}
+    col_to_hour_label: dict[int, str] = {}
 
     with pdfplumber.open(path) as pdf:
         for page_idx, page in enumerate(pdf.pages, start=1):
@@ -208,19 +281,10 @@ def parse_pdf(path: str) -> ParseResult:
 
             for table in tables:
                 data = table.extract()
-                if not data or len(data) < 2:
+                if not data:
                     continue
 
-                start_row = 0
-                row0_str = " ".join([_clean(c) for c in data[0] if c])
-                if any(d.lower() in row0_str.lower() for d in DAYS):
-                    current_day_map = _extract_day_col_map(data[0])
-                    start_row = 2 if len(data) > 2 else 1
-
-                if not current_day_map:
-                    continue
-
-                r = start_row
+                r = 0
                 num_rows = len(data)
 
                 while r < num_rows:
@@ -229,49 +293,76 @@ def parse_pdf(path: str) -> ParseResult:
                         r += 1
                         continue
 
+                    # A day-band header can recur mid-table (see module
+                    # docstring) - re-derive the column maps every time one
+                    # is seen rather than only trusting the table's row 0,
+                    # and consume its hour-label row right along with it so
+                    # neither is ever mistaken for a cohort/venue row below.
+                    if _is_header_row(row_data):
+                        hour_row = data[r + 1] if r + 1 < num_rows else []
+                        col_to_day, col_to_hour_label = _build_column_maps(row_data, hour_row)
+                        r += 2 if r + 1 < num_rows else 1
+                        continue
+
+                    if not col_to_day:
+                        r += 1
+                        continue
+
                     raw_label = row_data[0]
                     cohort_lines = _split_cell_lines(raw_label)
                     if not cohort_lines:
                         r += 1
                         continue
-
-                    # Look ahead for venue row
-                    venue_row = None
-                    if r + 1 < num_rows:
-                        next_row = data[r + 1]
-                        next_row_label = _clean(next_row[0]) if next_row else ""
-                        if not next_row_label:
-                            venue_row = next_row
+                    # Almost always a single line; the rare PDF line-wrap
+                    # ("BSC REN.ENER TECH & MNT" / "Y1S1" on two lines)
+                    # still needs both halves to match _COHORT_RE below.
+                    cohort_label = " ".join(cohort_lines)
 
                     n_cols = len(row_data)
-                    for c in range(1, n_cols):
+                    c = 1
+                    while c < n_cols:
                         cell_raw = row_data[c]
                         if not cell_raw:
+                            c += 1
                             continue
 
-                        unit_lines = _merge_split_group_lines(_split_cell_lines(cell_raw))
-                        v_lines = _split_cell_lines(venue_row[c]) if (venue_row and c < len(venue_row)) else []
+                        # A class spanning >1 hour is a merged cell -
+                        # pdfplumber represents the spanned columns as None.
+                        # Stop the span at a day boundary too, in case a
+                        # cell is ever merged right up against one.
+                        span_end = c
+                        day = col_to_day.get(c)
+                        while (
+                            span_end + 1 < n_cols
+                            and row_data[span_end + 1] is None
+                            and col_to_day.get(span_end + 1) == day
+                        ):
+                            span_end += 1
 
-                        if not v_lines and len(unit_lines) >= 2:
-                            if _is_likely_venue(unit_lines[-1]):
-                                v_lines = [unit_lines.pop()]
+                        start_label = col_to_hour_label.get(c)
+                        end_label = col_to_hour_label.get(span_end)
+                        if not (day and start_label and end_label):
+                            c = span_end + 1
+                            continue
 
-                        day_str = current_day_map.get(c, "Monday")
-                        st_time, end_time = _approx_time_for_col(c)
+                        start_time, _ = _hour_bounds(start_label)
+                        _, end_time = _hour_bounds(end_label)
 
-                        max_items = max(len(unit_lines), 1)
-                        for i in range(max_items):
-                            u_text = unit_lines[i] if i < len(unit_lines) else (unit_lines[0] if unit_lines else "")
+                        unit_lines = _merge_split_group_lines(
+                            _merge_split_unit_code_lines(_split_cell_lines(cell_raw))
+                        )
+                        venue_item = "TBA"
+                        if unit_lines and _is_likely_venue(unit_lines[-1]):
+                            venue_item = unit_lines.pop()
+                        elif unit_lines:
+                            loose_venue = _extract_venue_prefix(unit_lines[-1])
+                            if loose_venue:
+                                venue_item = loose_venue
+                                unit_lines.pop()
+
+                        for u_text in unit_lines:
                             if not u_text or _is_likely_venue(u_text):
                                 continue
-
-                            venue_item = "TBA"
-                            if i < len(v_lines):
-                                venue_item = v_lines[i]
-                            elif v_lines:
-                                venue_item = v_lines[-1]
-
-                            cohort_item = cohort_lines[i] if i < len(cohort_lines) else cohort_lines[0]
 
                             clean_unit, group = parse_unit_and_group(u_text)
                             if not clean_unit or len(clean_unit) < 3:
@@ -279,10 +370,10 @@ def parse_pdf(path: str) -> ParseResult:
 
                             result.slots.append(
                                 RawSlot(
-                                    cohort_label=cohort_item,
-                                    day=day_str,
-                                    start_time=st_time.split(":")[0],
-                                    end_time=end_time.split(":")[0],
+                                    cohort_label=cohort_label,
+                                    day=day,
+                                    start_time=start_time,
+                                    end_time=end_time,
                                     unit_code_raw=clean_unit,
                                     group=group,
                                     venue=venue_item,
@@ -292,10 +383,9 @@ def parse_pdf(path: str) -> ParseResult:
                                 )
                             )
 
-                    if venue_row is not None:
-                        r += 2
-                    else:
-                        r += 1
+                        c = span_end + 1
+
+                    r += 1
 
     return result
 
@@ -328,7 +418,18 @@ def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027
                     class_group = f"GR_{stream}"
 
         unit_code = normalise_unit_code(s.unit_code_raw)
+        # Every real Tharaka unit code is a letters+digits pair (COSC103,
+        # GEOG144, CHTM0020, ...). A handful of source-PDF cells suffer
+        # character-level extraction corruption pdfplumber can't recover
+        # from (e.g. "OSC\nC 312" for "COSC 312") - a code that's come out
+        # as letters-only or digits-only is that corruption, not a unit.
         if not unit_code or len(unit_code) < 3:
+            continue
+        if unit_code.isalpha() or unit_code.isdigit():
+            result.warnings.append(
+                f"page {s.page}: dropped unparseable unit code {unit_code!r} "
+                f"for cohort {s.cohort_label!r} (likely PDF text-extraction corruption)"
+            )
             continue
 
         raw_day = str(s.day or "").strip().lower()
