@@ -55,6 +55,32 @@ def serialize_user(user):
     }
 
 
+def _derive_registration_number(user) -> str:
+    reg_num = re.sub(r'[^A-Z0-9\-]', '', (user.university_id or '').upper())
+    return reg_num or f"STU-{user.id}"
+
+
+def _derive_admission_year(admission_number: str | None) -> int:
+    """Best-effort admission year from an admission number like 'ABT5/10954/24'."""
+    admission_yr = timezone.now().year
+    reg_num = re.sub(r'[^A-Z0-9\-/]', '', (admission_number or '').upper()).strip()
+    if not reg_num:
+        return admission_yr
+
+    match = re.search(r'[/\-](\d{2,4})$', reg_num)
+    if match:
+        yr_str = match.group(1)
+        if len(yr_str) == 2:
+            admission_yr = 2000 + int(yr_str)
+        elif len(yr_str) == 4:
+            admission_yr = int(yr_str)
+    else:
+        match = re.search(r'^(\d{2})[/\-]', reg_num)
+        if match:
+            admission_yr = 2000 + int(match.group(1))
+    return admission_yr
+
+
 class RegisterView(APIView):
     permission_classes = [AllowAny]
 
@@ -125,23 +151,8 @@ class RegisterView(APIView):
                 program.duration_years = year_of_study
                 program.save(update_fields=['duration_years'])
 
-            reg_num = re.sub(r'[^A-Z0-9\-]', '', admission_number.upper()) if admission_number else f"STU-{user.id}"
-            if not reg_num:
-                reg_num = f"STU-{user.id}"
-
-            admission_yr = timezone.now().year
-            if reg_num:
-                match = re.search(r'[/\-](\d{2,4})$', reg_num.strip())
-                if match:
-                    yr_str = match.group(1)
-                    if len(yr_str) == 2:
-                        admission_yr = 2000 + int(yr_str)
-                    elif len(yr_str) == 4:
-                        admission_yr = int(yr_str)
-                else:
-                    match = re.search(r'^(\d{2})[/\-]', reg_num.strip())
-                    if match:
-                        admission_yr = 2000 + int(match.group(1))
+            reg_num = _derive_registration_number(user)
+            admission_yr = _derive_admission_year(admission_number)
 
             current_term = AcademicTerm.objects.filter(is_current=True).first()
             current_sem = current_term.semester if current_term else 1
@@ -228,74 +239,103 @@ class ProfileView(APIView):
         user.save()
 
         student = getattr(user, 'student_profile', None)
-        if student:
-            if 'year_of_study' in data:
-                try:
-                    student.current_study_year = int(data['year_of_study'])
-                except (ValueError, TypeError):
-                    pass
+
+        year_of_study = None
+        if 'year_of_study' in data:
+            try:
+                year_of_study = int(data['year_of_study'])
+            except (ValueError, TypeError):
+                year_of_study = None
+
+        resolved_program = None
+        if data.get('program_id'):
+            # Preferred path: the student picked their course from
+            # timetable/metadata/, which only lists Program rows the
+            # master timetable upload actually created — linking to
+            # this exact row (rather than get_or_create-ing a new one
+            # by name below) is what lets schedule generation match
+            # TimetableSlot.program correctly.
+            try:
+                resolved_program = Program.objects.select_related('department').get(
+                    pk=data['program_id']
+                )
+            except (Program.DoesNotExist, ValueError, TypeError):
+                resolved_program = None
+
+        if not resolved_program and 'course' in data and 'department' in data:
+            # Fallback only: used when resolution above failed/wasn't
+            # provided (e.g. a term with no timetable slots yet). This
+            # get_or_create-by-name path creates its own Program/Department
+            # rows and will NOT generally match the ones the master
+            # timetable upload created, so it should not be relied on
+            # once slots exist.
+            dept_code = re.sub(r'[^A-Z]', '', data['department'].upper())[:20]
+            if not dept_code: dept_code = data['department'].upper()[:20]
+
+            faculty, _ = Faculty.objects.get_or_create(
+                code="GEN",
+                defaults={"name": "General", "description": "Default faculty"},
+            )
+
+            dept, _ = Department.objects.get_or_create(
+                faculty=faculty,
+                name=data['department'],
+                defaults={'code': dept_code},
+            )
+
+            prog_code = re.sub(r'[^A-Z]', '', data['course'].upper())[:30]
+            if not prog_code: prog_code = data['course'].upper()[:30]
+
+            study_year = year_of_study or (student.current_study_year if student else 1)
+            prog, _ = Program.objects.get_or_create(
+                department=dept,
+                name=data['course'],
+                defaults={
+                    'code': prog_code,
+                    'department': dept,
+                    'duration_years': max(4, study_year)
+                }
+            )
+            if prog.duration_years < study_year:
+                prog.duration_years = study_year
+                prog.save(update_fields=['duration_years'])
+            resolved_program = prog
+
+        if student is None:
+            # A student who registered without picking a course yet (the
+            # normal signup flow - see RegisterView, which only creates a
+            # Student row when department+course are given upfront) has no
+            # profile to update here. Without this, every field below was
+            # silently discarded: the stream-setup screen showed "saved"
+            # but nothing was ever persisted, and personalised-schedule
+            # generation and /timetable/metadata/ never respected the
+            # student's actual program/year/stream.
+            if resolved_program:
+                current_term = AcademicTerm.objects.filter(is_current=True).first()
+                student = Student.objects.create(
+                    user=user,
+                    registration_number=_derive_registration_number(user),
+                    first_name=user.first_name or "First",
+                    last_name=user.last_name or "Last",
+                    email=user.email,
+                    department=resolved_program.department,
+                    program=resolved_program,
+                    admission_year=_derive_admission_year(user.university_id),
+                    current_study_year=year_of_study or 1,
+                    current_semester=current_term.semester if current_term else 1,
+                    combination=str(data.get('combination', '')).strip(),
+                    timetable_group=str(data.get('timetable_group', '')).strip(),
+                )
+        else:
+            if year_of_study is not None:
+                student.current_study_year = year_of_study
             if 'combination' in data:
                 student.combination = str(data['combination']).strip()
             if 'timetable_group' in data:
                 student.timetable_group = str(data['timetable_group']).strip()
-
-            resolved_program = None
-            if data.get('program_id'):
-                # Preferred path: the student picked their course from
-                # timetable/metadata/, which only lists Program rows the
-                # master timetable upload actually created — linking to
-                # this exact row (rather than get_or_create-ing a new one
-                # by name below) is what lets schedule generation match
-                # TimetableSlot.program correctly.
-                try:
-                    resolved_program = Program.objects.select_related('department').get(
-                        pk=data['program_id']
-                    )
-                except (Program.DoesNotExist, ValueError, TypeError):
-                    resolved_program = None
-
             if resolved_program:
                 student.program = resolved_program
                 student.department = resolved_program.department
-            elif 'course' in data and 'department' in data:
-                # Fallback only: used when resolution above failed/wasn't
-                # provided (e.g. a term with no timetable slots yet). This
-                # get_or_create-by-name path creates its own Program/Department
-                # rows and will NOT generally match the ones the master
-                # timetable upload created, so it should not be relied on
-                # once slots exist.
-                dept_code = re.sub(r'[^A-Z]', '', data['department'].upper())[:20]
-                if not dept_code: dept_code = data['department'].upper()[:20]
-
-                faculty, _ = Faculty.objects.get_or_create(
-                    code="GEN",
-                    defaults={"name": "General", "description": "Default faculty"},
-                )
-
-                dept, _ = Department.objects.get_or_create(
-                    faculty=faculty,
-                    name=data['department'],
-                    defaults={'code': dept_code},
-                )
-
-                prog_code = re.sub(r'[^A-Z]', '', data['course'].upper())[:30]
-                if not prog_code: prog_code = data['course'].upper()[:30]
-
-                study_year = student.current_study_year
-                prog, _ = Program.objects.get_or_create(
-                    department=dept,
-                    name=data['course'],
-                    defaults={
-                        'code': prog_code,
-                        'department': dept,
-                        'duration_years': max(4, study_year)
-                    }
-                )
-                if prog.duration_years < study_year:
-                    prog.duration_years = study_year
-                    prog.save(update_fields=['duration_years'])
-                student.program = prog
-                student.department = dept
             student.save()
 
         return Response(serialize_user(user))
