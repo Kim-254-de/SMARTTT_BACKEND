@@ -53,7 +53,7 @@ class AcademicTermViewSet(ModelViewSet):
 
 class TimetableSlotViewSet(ModelViewSet):
     permission_classes = [CanManageTimetable]
-    filterset_fields = ["term", "day_of_week", "room", "lecturer", "upload_batch"]
+    filterset_fields = ["term", "day_of_week", "room", "lecturer", "upload_batch", "unit"]
     ordering_fields = ["term", "_day_sort", "start_time", "end_time"]
     ordering = ["term", "_day_sort", "start_time"]
     pagination_class = StandardResultsSetPagination
