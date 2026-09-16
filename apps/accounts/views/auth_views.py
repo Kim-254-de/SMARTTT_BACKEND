@@ -4,6 +4,7 @@ import secrets
 
 from django.conf import settings
 from django.contrib.auth import authenticate
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -56,8 +57,13 @@ def serialize_user(user):
 
 
 def _derive_registration_number(user) -> str:
-    reg_num = re.sub(r'[^A-Z0-9\-]', '', (user.university_id or '').upper())
-    return reg_num or f"STU-{user.id}"
+    # Only normalize case/whitespace here - Student.save() is the single
+    # source of truth on which characters are actually valid (its
+    # RegexValidator), so a genuinely malformed admission number surfaces
+    # as a real ValidationError there instead of being silently sanitized
+    # into something else.
+    reg_num = (user.university_id or '').strip().upper()
+    return reg_num or f"STU-{user.id}".upper()
 
 
 def _derive_admission_year(admission_number: str | None) -> int:
@@ -121,56 +127,66 @@ class RegisterView(APIView):
         )
 
         if department_name and course_name:
-            dept_code = re.sub(r'[^A-Z]', '', department_name.upper())[:20]
-            if not dept_code: dept_code = department_name.upper()[:20]
+            try:
+                with transaction.atomic():
+                    dept_code = re.sub(r'[^A-Z]', '', department_name.upper())[:20]
+                    if not dept_code: dept_code = department_name.upper()[:20]
 
-            faculty, _ = Faculty.objects.get_or_create(
-                code="GEN",
-                defaults={'name': 'General Faculty'}
-            )
-            
-            department, _ = Department.objects.get_or_create(
-                faculty=faculty,
-                name=department_name,
-                defaults={'code': dept_code, 'faculty': faculty}
-            )
-            
-            prog_code = re.sub(r'[^A-Z]', '', course_name.upper())[:30]
-            if not prog_code: prog_code = course_name.upper()[:30]
+                    faculty, _ = Faculty.objects.get_or_create(
+                        code="GEN",
+                        defaults={'name': 'General Faculty'}
+                    )
 
-            program, _ = Program.objects.get_or_create(
-                department=department,
-                name=course_name,
-                defaults={
-                    'code': prog_code,
-                    'department': department,
-                    'duration_years': max(4, year_of_study)
-                }
-            )
-            if program.duration_years < year_of_study:
-                program.duration_years = year_of_study
-                program.save(update_fields=['duration_years'])
+                    department, _ = Department.objects.get_or_create(
+                        faculty=faculty,
+                        name=department_name,
+                        defaults={'code': dept_code, 'faculty': faculty}
+                    )
 
-            reg_num = _derive_registration_number(user)
-            admission_yr = _derive_admission_year(admission_number)
+                    prog_code = re.sub(r'[^A-Z]', '', course_name.upper())[:30]
+                    if not prog_code: prog_code = course_name.upper()[:30]
 
-            current_term = AcademicTerm.objects.filter(is_current=True).first()
-            current_sem = current_term.semester if current_term else 1
+                    program, _ = Program.objects.get_or_create(
+                        department=department,
+                        name=course_name,
+                        defaults={
+                            'code': prog_code,
+                            'department': department,
+                            'duration_years': max(4, year_of_study)
+                        }
+                    )
+                    if program.duration_years < year_of_study:
+                        program.duration_years = year_of_study
+                        program.save(update_fields=['duration_years'])
 
-            Student.objects.create(
-                user=user,
-                registration_number=reg_num,
-                first_name=first_name or "First",
-                last_name=last_name or "Last",
-                email=email,
-                department=department,
-                program=program,
-                admission_year=admission_yr,
-                current_study_year=year_of_study,
-                current_semester=current_sem,
-                combination=combination,
-                timetable_group=timetable_group,
-            )
+                    reg_num = _derive_registration_number(user)
+                    admission_yr = _derive_admission_year(admission_number)
+
+                    current_term = AcademicTerm.objects.filter(is_current=True).first()
+                    current_sem = current_term.semester if current_term else 1
+
+                    Student.objects.create(
+                        user=user,
+                        registration_number=reg_num,
+                        first_name=first_name or "First",
+                        last_name=last_name or "Last",
+                        email=email,
+                        department=department,
+                        program=program,
+                        admission_year=admission_yr,
+                        current_study_year=year_of_study,
+                        current_semester=current_sem,
+                        combination=combination,
+                        timetable_group=timetable_group,
+                    )
+            except DjangoValidationError as exc:
+                # e.g. an admission number with a character the registration
+                # number format rejects - the user account above is kept
+                # (this savepoint only rolls back the department/program/
+                # student creation), so they can still log in and complete
+                # their profile from the stream-setup screen.
+                detail = exc.message_dict if hasattr(exc, "message_dict") else {"detail": exc.messages}
+                return Response(detail, status=status.HTTP_400_BAD_REQUEST)
 
         tokens = get_tokens_for_user(user)
         return Response({
@@ -312,20 +328,25 @@ class ProfileView(APIView):
             # student's actual program/year/stream.
             if resolved_program:
                 current_term = AcademicTerm.objects.filter(is_current=True).first()
-                student = Student.objects.create(
-                    user=user,
-                    registration_number=_derive_registration_number(user),
-                    first_name=user.first_name or "First",
-                    last_name=user.last_name or "Last",
-                    email=user.email,
-                    department=resolved_program.department,
-                    program=resolved_program,
-                    admission_year=_derive_admission_year(user.university_id),
-                    current_study_year=year_of_study or 1,
-                    current_semester=current_term.semester if current_term else 1,
-                    combination=str(data.get('combination', '')).strip(),
-                    timetable_group=str(data.get('timetable_group', '')).strip(),
-                )
+                try:
+                    with transaction.atomic():
+                        student = Student.objects.create(
+                            user=user,
+                            registration_number=_derive_registration_number(user),
+                            first_name=user.first_name or "First",
+                            last_name=user.last_name or "Last",
+                            email=user.email,
+                            department=resolved_program.department,
+                            program=resolved_program,
+                            admission_year=_derive_admission_year(user.university_id),
+                            current_study_year=year_of_study or 1,
+                            current_semester=current_term.semester if current_term else 1,
+                            combination=str(data.get('combination', '')).strip(),
+                            timetable_group=str(data.get('timetable_group', '')).strip(),
+                        )
+                except DjangoValidationError as exc:
+                    detail = exc.message_dict if hasattr(exc, "message_dict") else {"detail": exc.messages}
+                    return Response(detail, status=status.HTTP_400_BAD_REQUEST)
         else:
             if year_of_study is not None:
                 student.current_study_year = year_of_study

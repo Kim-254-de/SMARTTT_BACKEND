@@ -2,7 +2,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .services import generate_for_user
+from .services import generate_for_user, get_matching_slots
 from datetime import datetime, timedelta
 
 import pytz
@@ -45,8 +45,10 @@ class CalendarTokenView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
+        # user.id is a UUID, which the signer's underlying json.dumps can't
+        # serialize on its own - stringify it up front.
         token = signing.dumps(
-            {'user_id': request.user.id}, salt=CALENDAR_TOKEN_SALT
+            {'user_id': str(request.user.id)}, salt=CALENDAR_TOKEN_SALT
         )
         feed_path = reverse('my-calendar-feed')
         feed_url = request.build_absolute_uri(f'{feed_path}?token={token}')
@@ -97,9 +99,11 @@ class MyCalendarFeedView(APIView):
                 .values_list('unit_id', flat=True)
             )
 
-            slots = TimetableSlot.objects.select_related(
-                'unit', 'room', 'lecturer__user'
-            ).filter(term=term, unit_id__in=unit_ids)
+            # Same program/stream narrowing and dedup as the JSON schedule
+            # (MyScheduleView) - without it, a shared unit taught in
+            # parallel to other programs/streams would list every one of
+            # those sections here too, not just the student's own class.
+            slots = get_matching_slots(user, term, unit_ids)
 
         # Lecturer timetable
         else:
@@ -118,10 +122,11 @@ class MyCalendarFeedView(APIView):
 
         for slot in slots:
             event = Event()
+            slot_day = slot.day_of_week.upper() if slot.day_of_week else "MON"
 
             # First occurrence of the class in the semester
             current = term.start_date
-            while current.weekday() != list(day_map.keys()).index(slot.day):
+            while current.weekday() != list(day_map.keys()).index(slot_day):
                 current += timedelta(days=1)
 
             start_dt = tz.localize(
@@ -152,7 +157,7 @@ class MyCalendarFeedView(APIView):
                 'until': tz.localize(
                     datetime.combine(term.end_date, datetime.max.time())
                 ),
-                'byday': day_map[slot.day],
+                'byday': day_map[slot_day],
             })
 
             # Reminder 1: 30 minutes before

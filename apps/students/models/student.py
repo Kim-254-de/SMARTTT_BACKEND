@@ -60,11 +60,11 @@ class Student(BaseModel):
         max_length=50,
         unique=True,
         db_index=True,
-        help_text=_("Unique student registration number (e.g., STU2024001)"),
+        help_text=_("Unique student registration number (e.g., STU2024001 or ABT5/10954/24)"),
         validators=[
             RegexValidator(
-                regex=r"^[A-Z0-9\-]+$",
-                message=_("Registration number must contain only uppercase letters, numbers, and hyphens"),
+                regex=r"^[A-Z0-9\-/]+$",
+                message=_("Registration number must contain only uppercase letters, numbers, hyphens, and slashes"),
                 code="invalid_registration_number",
             )
         ],
@@ -264,6 +264,11 @@ class Student(BaseModel):
 
     def save(self, *args, **kwargs) -> None:
         """Save student with validation."""
+        if self.registration_number:
+            # Normalize before validation runs, so a real admission number
+            # like "ebt1/09919/23" (as typed, or as the university prints
+            # it) validates and stores the same way regardless of case.
+            self.registration_number = self.registration_number.strip().upper()
         self.full_clean()
         super().save(*args, **kwargs)
 

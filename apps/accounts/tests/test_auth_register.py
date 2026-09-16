@@ -7,7 +7,7 @@ from apps.students.models import Student
 
 class RegisterViewTests(APITestCase):
     def test_register_accepts_slash_registration_number(self):
-        url = reverse("auth_register")
+        url = reverse("register")
         payload = {
             "email": "ebt1@example.com",
             "password": "secret123",
@@ -24,7 +24,7 @@ class RegisterViewTests(APITestCase):
         self.assertTrue(Student.objects.filter(registration_number="EBT1/09919/23").exists())
 
     def test_register_returns_400_for_invalid_registration_number(self):
-        url = reverse("auth_register")
+        url = reverse("register")
         payload = {
             "email": "badreg@example.com",
             "password": "secret123",

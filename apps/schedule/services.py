@@ -26,6 +26,61 @@ def _has_overlap(slot_a: TimetableSlot, slot_b: TimetableSlot) -> bool:
     return slot_a.start_time < slot_b.end_time and slot_a.end_time > slot_b.start_time
 
 
+def get_matching_slots(user, term, unit_ids) -> list[TimetableSlot]:
+    """
+    The student's own TimetableSlot rows for `unit_ids` this term - shared by
+    generate_for_user (JSON schedule) and the .ics calendar feed, so both
+    narrow a shared unit down to the student's own class (see the filtering
+    rationale below) and dedupe identical rows from repeated uploads the
+    same way.
+    """
+    # A shared unit (e.g. a foundation course like EDCI or EPSC) can be taught
+    # to several different combinations/streams in parallel, each as its own
+    # TimetableSlot row. Filtering by unit alone would return every one of
+    # those - not just the student's own class. Narrow by the student's
+    # program (their exact combination, e.g. "BED.MATH/CHEM" - resolved via
+    # the preferences screen, see ProfileView.patch's program_id handling)
+    # and, when set, their stream (the numbered sub-class within that
+    # program+year, e.g. the "1" in "...Y3S1(1)" - see TimetableSlot.stream).
+    # Slots with a blank stream aren't split into multiple classes for that
+    # unit, so they always match regardless of the student's stream.
+    student = getattr(user, "student_profile", None)
+    program_id = getattr(student, "program_id", None)
+    stream = (getattr(student, "timetable_group", None) or "").strip()
+
+    slot_filter = Q(term=term, unit_id__in=unit_ids)
+    if program_id:
+        slot_filter &= Q(program_id=program_id)
+    if stream:
+        slot_filter &= (Q(stream=stream) | Q(stream=""))
+
+    raw_slots = list(
+        TimetableSlot.objects.select_related(
+            "unit", "program", "lecturer__user", "room", "term"
+        )
+        .filter(slot_filter)
+        .annotate(_day_sort=day_of_week_sort_case())
+        .order_by("_day_sort", "start_time")
+    )
+
+    # DEDUPLICATION: purge duplicate slots from repeated file uploads.
+    seen_signatures = set()
+    slots: list[TimetableSlot] = []
+    for slot in raw_slots:
+        # Signature uniquely identifies a distinct scheduled session
+        signature = (
+            slot.unit_id,
+            slot.day_of_week.upper() if slot.day_of_week else "",
+            slot.start_time,
+            slot.end_time,
+            slot.room_id,
+        )
+        if signature not in seen_signatures:
+            seen_signatures.add(signature)
+            slots.append(slot)
+    return slots
+
+
 def generate_for_user(user) -> dict:
     """
     Returns:
@@ -79,50 +134,7 @@ def generate_for_user(user) -> dict:
         }
 
     # ── 3. Fetch matching timetable slots ──────────────────────────────────────
-    # A shared unit (e.g. a foundation course like EDCI or EPSC) can be taught
-    # to several different combinations/streams in parallel, each as its own
-    # TimetableSlot row. Filtering by unit alone would return every one of
-    # those - not just the student's own class. Narrow by the student's
-    # program (their exact combination, e.g. "BED.MATH/CHEM" - resolved via
-    # the preferences screen, see ProfileView.patch's program_id handling)
-    # and, when set, their stream (the numbered sub-class within that
-    # program+year, e.g. the "1" in "...Y3S1(1)" - see TimetableSlot.stream).
-    # Slots with a blank stream aren't split into multiple classes for that
-    # unit, so they always match regardless of the student's stream.
-    student = getattr(user, "student_profile", None)
-    program_id = getattr(student, "program_id", None)
-    stream = (getattr(student, "timetable_group", None) or "").strip()
-
-    slot_filter = Q(term=term, unit_id__in=unit_ids)
-    if program_id:
-        slot_filter &= Q(program_id=program_id)
-    if stream:
-        slot_filter &= (Q(stream=stream) | Q(stream=""))
-
-    raw_slots = list(
-        TimetableSlot.objects.select_related(
-            "unit", "program", "lecturer__user", "room", "term"
-        )
-        .filter(slot_filter)
-        .annotate(_day_sort=day_of_week_sort_case())
-        .order_by("_day_sort", "start_time")
-    )
-
-    # ── 3b. DEDUPLICATION: Purge duplicate slots from repeated file uploads ─────
-    seen_signatures = set()
-    slots: list[TimetableSlot] = []
-    for slot in raw_slots:
-        # Signature uniquely identifies a distinct scheduled session
-        signature = (
-            slot.unit_id,
-            slot.day_of_week.upper() if slot.day_of_week else "",
-            slot.start_time,
-            slot.end_time,
-            slot.room_id,
-        )
-        if signature not in seen_signatures:
-            seen_signatures.add(signature)
-            slots.append(slot)
+    slots = get_matching_slots(user, term, unit_ids)
 
     # ── 4. Group by day ────────────────────────────────────────────────────────
     grouped: dict[str, list] = {day: [] for day in DAY_ORDER}
