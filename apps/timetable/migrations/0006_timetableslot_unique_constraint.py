@@ -30,6 +30,8 @@ def dedupe_timetable_slots(apps, schema_editor):
 
 class Migration(migrations.Migration):
 
+    atomic = False
+
     dependencies = [
         ('timetable', '0005_timetableslot_stream'),
     ]
