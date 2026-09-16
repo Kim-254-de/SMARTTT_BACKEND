@@ -45,7 +45,8 @@ def serialize_user(user):
         "email": user.email,
         "full_name": user.get_full_name(),
         "role": user.role,
-        "admission_number": user.university_id,
+        "university_id": user.university_id,
+        "phone_number": user.phone_number,
         "course": getattr(program, 'name', None),
         "department": getattr(department, 'name', None),
         "year_of_study": getattr(student, 'current_study_year', None),
@@ -220,7 +221,10 @@ class ProfileView(APIView):
             
         if 'admission_number' in data:
             user.university_id = data['admission_number']
-            
+
+        if 'phone_number' in data:
+            user.phone_number = data['phone_number']
+
         user.save()
 
         student = getattr(user, 'student_profile', None)
