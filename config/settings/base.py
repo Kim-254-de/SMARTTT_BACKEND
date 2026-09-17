@@ -125,7 +125,7 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@nextup.co.ke")
 FRONTEND_RESET_PASSWORD_URL = os.getenv(
     "FRONTEND_RESET_PASSWORD_URL",
-    "http://localhost:8080/reset-password",
+    "https://nextup.co.ke/reset-password.html",
 )
 
 PASSWORD_HASHERS = [
