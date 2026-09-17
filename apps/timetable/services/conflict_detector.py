@@ -127,10 +127,28 @@ class TimetableConflictDetectionService:
         if slot_a.lecturer_id and slot_b.lecturer_id and slot_a.lecturer_id == slot_b.lecturer_id:
             conflicts.append(TimetableConflict.Type.LECTURER)
         
-        # Program conflict: same program
-        if slot_a.program_id and slot_b.program_id:
-            if slot_a.program_id == slot_b.program_id:
-                conflicts.append(TimetableConflict.Type.PROGRAM)
+        # Program conflict: same program AND same actual student audience.
+        # A program legitimately runs multiple parallel streams of the same
+        # unit/year at overlapping times in different rooms (e.g. a shared
+        # unit split into stream "1" and stream "2" - see TimetableSlot.stream
+        # docstring), so matching program_id alone is not enough - that
+        # flagged false "conflicts" between two streams that were never
+        # meant to be mutually exclusive. Only non-blank, differing streams
+        # are disjoint audiences; a blank stream applies to everyone in that
+        # program+year (see schedule/services.get_matching_slots), so it
+        # still conflicts with any specific stream.
+        stream_a = (slot_a.stream or "").strip()
+        stream_b = (slot_b.stream or "").strip()
+        streams_disjoint = bool(stream_a) and bool(stream_b) and stream_a != stream_b
+
+        if (
+            slot_a.program_id
+            and slot_b.program_id
+            and slot_a.program_id == slot_b.program_id
+            and slot_a.year_of_study == slot_b.year_of_study
+            and not streams_disjoint
+        ):
+            conflicts.append(TimetableConflict.Type.PROGRAM)
         
         return conflicts if conflicts else [TimetableConflict.Type.ROOM]  # Default to ROOM
     
