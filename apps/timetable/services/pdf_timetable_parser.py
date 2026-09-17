@@ -412,10 +412,20 @@ def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027
             # letters (see TimetableSlot.stream docstring), so this must not
             # be overwritten or skipped just because class_group already has
             # a value.
+            #
+            # class_group is deliberately left as "MAIN" here even when the
+            # cohort has a numbered stream: a unit taught to the whole
+            # stream with no further elective split (e.g. MATH301 under
+            # ...Y3S1(1)) is genuinely ungrouped - relabelling it to
+            # "GR_<stream>" would make it indistinguishable from a unit that
+            # really is split into per-elective groups (e.g. CHEM323's
+            # "GR_B"), which breaks class_group's MAIN/grouped semantics for
+            # every stream-split program and defeats anything that keys off
+            # it (e.g. AssignLecturersAPIView's group-hint matching). The
+            # student's own stream is already carried on `stream` above, so
+            # nothing is lost by leaving class_group alone.
             if m.group("cohort_sub"):
                 stream = m.group("cohort_sub")
-                if class_group == "MAIN":
-                    class_group = f"GR_{stream}"
 
         unit_code = normalise_unit_code(s.unit_code_raw)
         # Every real Tharaka unit code is a letters+digits pair (COSC103,

@@ -50,6 +50,42 @@ def _program_ids_for_student(student) -> list:
     ]
 
 
+def _base_unit_slot_queryset(student, term, unit_id):
+    """
+    TimetableSlot rows for a single unit, narrowed to the student's program
+    (see _program_ids_for_student) and stream, but *not* yet narrowed by
+    class_group - the shared starting point for both available_groups_for_unit
+    (which needs to see every group to list them) and get_matching_slots
+    (which narrows further once a choice is known).
+    """
+    program_ids = _program_ids_for_student(student)
+    stream = (getattr(student, "timetable_group", None) or "").strip()
+
+    qs = TimetableSlot.objects.filter(term=term, unit_id=unit_id)
+    if program_ids:
+        qs = qs.filter(program_id__in=program_ids)
+    if stream:
+        qs = qs.filter(Q(stream=stream) | Q(stream=""))
+    return qs
+
+
+def available_groups_for_unit(user, term, unit_id) -> list[str]:
+    """
+    Distinct elective/practical group letters (e.g. "GR B") this unit is
+    split into for the student's own program+stream, excluding "MAIN".
+    Empty means the unit isn't split - there's nothing to pick between, so
+    every one of its sessions is the student's own regardless of group.
+    """
+    student = getattr(user, "student_profile", None)
+    if not student:
+        return []
+    raw = _base_unit_slot_queryset(student, term, unit_id).values_list("class_group", flat=True)
+    return sorted({
+        g.strip() for g in raw
+        if g and g.strip() and g.strip().upper() != "MAIN"
+    })
+
+
 def get_matching_slots(user, term, unit_ids) -> list[TimetableSlot]:
     """
     The student's own TimetableSlot rows for `unit_ids` this term - shared by
@@ -74,7 +110,30 @@ def get_matching_slots(user, term, unit_ids) -> list[TimetableSlot]:
     program_ids = _program_ids_for_student(student)
     stream = (getattr(student, "timetable_group", None) or "").strip()
 
-    slot_filter = Q(term=term, unit_id__in=unit_ids)
+    # Different unit pools within the same stream can be split into groups
+    # with unrelated lettering at the same time (e.g. EDCI/EPSC's "GR J" vs
+    # MATH's "GR C" vs CHEM's "GR B", all within "...Y3S1(1)") - there's no
+    # single stream-wide group letter that works for every unit. So the
+    # student's chosen group is tracked per-unit on StudentUnit.class_group
+    # (see available_groups_for_unit / apps.courses.views.SetUnitGroupView),
+    # not as a second flat field alongside `stream`. A unit with no choice
+    # made yet (or that isn't split at all) keeps showing every group's
+    # sessions, same as before this existed.
+    chosen_groups = dict(
+        StudentUnit.objects.filter(user=user, term=term, unit_id__in=unit_ids)
+        .exclude(class_group="")
+        .values_list("unit_id", "class_group")
+    )
+
+    unit_filter = Q()
+    for uid in unit_ids:
+        chosen = chosen_groups.get(uid)
+        if chosen:
+            unit_filter |= Q(unit_id=uid, class_group__iexact=chosen) | Q(unit_id=uid, class_group__iexact="MAIN")
+        else:
+            unit_filter |= Q(unit_id=uid)
+
+    slot_filter = Q(term=term) & unit_filter
     if program_ids:
         slot_filter &= Q(program_id__in=program_ids)
     if stream:
@@ -93,13 +152,23 @@ def get_matching_slots(user, term, unit_ids) -> list[TimetableSlot]:
     seen_signatures = set()
     slots: list[TimetableSlot] = []
     for slot in raw_slots:
-        # Signature uniquely identifies a distinct scheduled session
+        # Signature uniquely identifies a distinct scheduled session. Uses
+        # the room's CODE text (formatting-insensitive, like
+        # canonical_program_key) rather than its FK id: a room can end up as
+        # several duplicate Room rows across separate uploads the same way
+        # Program does (e.g. "TC5" vs "TC 5" for the same physical venue -
+        # see _program_ids_for_student), so two uploads' rows for what is
+        # really the same class at the same time/room would otherwise carry
+        # different room_id values - and merely stripping outer whitespace
+        # wouldn't catch a space *inside* the code - and slip past this
+        # dedup as if they were two distinct sessions.
+        room_key = canonical_program_key(slot.room.code) if slot.room_id else ""
         signature = (
             slot.unit_id,
             slot.day_of_week.upper() if slot.day_of_week else "",
             slot.start_time,
             slot.end_time,
-            slot.room_id,
+            room_key,
         )
         if signature not in seen_signatures:
             seen_signatures.add(signature)
@@ -141,7 +210,19 @@ def generate_for_user(user) -> dict:
     )
     unit_ids = [su.unit_id for su in student_units]
     unit_data = [
-        {"id": str(su.unit.id), "code": su.unit.code, "name": su.unit.name}
+        {
+            "id": str(su.unit.id),
+            "code": su.unit.code,
+            "name": su.unit.name,
+            "selected_group": su.class_group or None,
+            # Non-empty only when this unit is actually split into more than
+            # one elective/practical group for the student's program+stream
+            # - the app should prompt to pick one of these (via
+            # PATCH /courses/my-courses/{id}/group/) when selected_group is
+            # still null, rather than silently showing every group's
+            # sessions - see get_matching_slots.
+            "available_groups": available_groups_for_unit(user, term, su.unit_id),
+        }
         for su in student_units
     ]
 

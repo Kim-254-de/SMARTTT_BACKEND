@@ -6,7 +6,12 @@ from rest_framework.views import APIView
 
 from .models import StudentUnit
 from .scraper import ScraperError, scrape_student_units
-from .serializers import ManualSyncSerializer, PortalSyncSerializer, StudentUnitSerializer
+from .serializers import (
+    ManualSyncSerializer,
+    PortalSyncSerializer,
+    SetUnitGroupSerializer,
+    StudentUnitSerializer,
+)
 from .services import sync_units_for_student
 
 
@@ -87,3 +92,53 @@ class MyCoursesView(ListAPIView):
             .filter(user=self.request.user)
             .order_by("unit__code")
         )
+
+
+class SetUnitGroupView(APIView):
+    """
+    PATCH /api/v1/courses/my-courses/{id}/group/
+    Body: {"class_group": "GR B"}
+
+    Records which elective/practical group the student is actually in for
+    one specific registered unit. Only meaningful when that unit is split
+    into more than one group for the student's program+stream (see
+    StudentUnitSerializer.available_groups / available_groups_for_unit) -
+    different unit pools within the same stream use unrelated group
+    lettering at once, so this can't be set once for the whole stream the
+    way `timetable_group` (the numbered sub-stream) is.
+
+    Pass "" to clear a previous choice back to "show every group".
+    """
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, pk=None):
+        from apps.schedule.services import available_groups_for_unit
+
+        try:
+            student_unit = StudentUnit.objects.select_related("unit").get(
+                pk=pk, user=request.user
+            )
+        except StudentUnit.DoesNotExist:
+            return Response({"detail": "Registered unit not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        s = SetUnitGroupSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        chosen = s.validated_data["class_group"].strip()
+
+        if chosen:
+            options = available_groups_for_unit(request.user, student_unit.term, student_unit.unit_id)
+            matched = next((o for o in options if o.upper() == chosen.upper()), None)
+            if not matched:
+                return Response(
+                    {
+                        "detail": f"'{chosen}' is not a valid group for {student_unit.unit.code}.",
+                        "available_groups": options,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            chosen = matched
+
+        student_unit.class_group = chosen
+        student_unit.save(update_fields=["class_group"])
+
+        return Response(StudentUnitSerializer(student_unit, context={"request": request}).data)
