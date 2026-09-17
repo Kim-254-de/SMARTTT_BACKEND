@@ -50,6 +50,15 @@ class AcademicTermViewSet(ModelViewSet):
     ordering = ["-academic_year", "-semester"]
     pagination_class = StandardResultsSetPagination
 
+    @action(detail=True, methods=["delete"], url_path="clear-slots")
+    def clear_slots(self, request, pk=None):
+        term = self.get_object()
+        deleted_count, _ = TimetableSlot.objects.filter(term=term).delete()
+        return Response(
+            {"detail": f"Deleted {deleted_count} slot(s) for this term."},
+            status=status.HTTP_200_OK,
+        )
+
 
 class TimetableSlotViewSet(ModelViewSet):
     permission_classes = [CanManageTimetable]
@@ -304,3 +313,26 @@ class TimetableUploadStatusAPIView(APIView):
             "rows_saved": batch.rows_saved,
             "rows_failed": batch.rows_failed,
         }, status=status.HTTP_200_OK)
+
+
+class TimetableUploadDeleteAPIView(APIView):
+    """
+    Deletes an upload batch's audit record only. TimetableSlot.upload_batch
+    uses on_delete=SET_NULL, so slots created by this batch are untouched.
+    """
+    permission_classes = [CanManageTimetable]
+
+    def delete(self, request, batch_id, *args, **kwargs):
+        try:
+            batch = TimetableUploadBatch.objects.get(id=batch_id)
+        except TimetableUploadBatch.DoesNotExist:
+            return Response(
+                {"detail": "Upload batch not found."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        batch.delete()
+        return Response(
+            {"detail": "Upload record deleted."},
+            status=status.HTTP_200_OK
+        )

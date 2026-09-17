@@ -8,6 +8,7 @@ from apps.timetable.views.timetable_viewsets import (
     TimetableUploadAPIView,
     TimetableUploadStatusAPIView,
     TimetableUploadListViewSet,
+    TimetableUploadDeleteAPIView,
 )
 from apps.timetable.views.viewsets import RoomViewSet, TimeSlotViewSet, TimetableSessionViewSet
 from apps.timetable.views.allocation_views import AssignLecturersAPIView
@@ -24,6 +25,7 @@ urlpatterns = [
     path("", include(router.urls)),
     path("upload/", TimetableUploadAPIView.as_view(), name="timetable-upload"),
     path("upload/<uuid:batch_id>/status/", TimetableUploadStatusAPIView.as_view(), name="timetable-upload-status"),
+    path("upload/<uuid:batch_id>/delete/", TimetableUploadDeleteAPIView.as_view(), name="timetable-upload-delete"),
     path("upload/list/", TimetableUploadListViewSet.as_view({"get": "list"}), name="timetable-upload-list"),
     path("assign-lecturers/", AssignLecturersAPIView.as_view(), name="timetable-assign-lecturers"),
     path('metadata/', TimetableMetadataView.as_view(), name='timetable-metadata'),
