@@ -15,7 +15,8 @@ from __future__ import annotations
 from django.db.models import Q
 
 from apps.courses.models import StudentUnit
-from django.db.models import Q
+from apps.programs.models import Program
+from apps.programs.utils import canonical_program_key
 from apps.timetable.models import AcademicTerm, TimetableSlot
 from apps.timetable.utils.day_order import day_of_week_sort_case
 
@@ -24,6 +25,29 @@ DAY_ORDER = ["MON", "TUE", "WED", "THU", "FRI", "SAT"]
 
 def _has_overlap(slot_a: TimetableSlot, slot_b: TimetableSlot) -> bool:
     return slot_a.start_time < slot_b.end_time and slot_a.end_time > slot_b.start_time
+
+
+def _program_ids_for_student(student) -> list:
+    """
+    A program can exist as several duplicate Program rows - different
+    timetable uploads (e.g. the master timetable vs. a later allocation
+    supplement) can parse the same program header with slightly different
+    text and each create their own row (see apps.programs.utils for why).
+    student.program only ever points at one of those rows, but that
+    program's TimetableSlot rows can be split across all of its
+    duplicates - e.g. a shared unit's ungrouped "MAIN" slot landing under
+    one duplicate while its group-split slots landed under another. Match
+    every row that canonically resolves to the same program name, not
+    just the single one saved on the profile.
+    """
+    program = getattr(student, "program", None)
+    if not program:
+        return []
+    key = canonical_program_key(program.name)
+    return [
+        p.id for p in Program.objects.only("id", "name")
+        if canonical_program_key(p.name) == key
+    ]
 
 
 def get_matching_slots(user, term, unit_ids) -> list[TimetableSlot]:
@@ -39,18 +63,20 @@ def get_matching_slots(user, term, unit_ids) -> list[TimetableSlot]:
     # TimetableSlot row. Filtering by unit alone would return every one of
     # those - not just the student's own class. Narrow by the student's
     # program (their exact combination, e.g. "BED.MATH/CHEM" - resolved via
-    # the preferences screen, see ProfileView.patch's program_id handling)
-    # and, when set, their stream (the numbered sub-class within that
-    # program+year, e.g. the "1" in "...Y3S1(1)" - see TimetableSlot.stream).
-    # Slots with a blank stream aren't split into multiple classes for that
-    # unit, so they always match regardless of the student's stream.
+    # the preferences screen, see ProfileView.patch's program_id handling,
+    # and widened to cover duplicate Program rows - see
+    # _program_ids_for_student) and, when set, their stream (the numbered
+    # sub-class within that program+year, e.g. the "1" in "...Y3S1(1)" - see
+    # TimetableSlot.stream). Slots with a blank stream aren't split into
+    # multiple classes for that unit, so they always match regardless of the
+    # student's stream.
     student = getattr(user, "student_profile", None)
-    program_id = getattr(student, "program_id", None)
+    program_ids = _program_ids_for_student(student)
     stream = (getattr(student, "timetable_group", None) or "").strip()
 
     slot_filter = Q(term=term, unit_id__in=unit_ids)
-    if program_id:
-        slot_filter &= Q(program_id=program_id)
+    if program_ids:
+        slot_filter &= Q(program_id__in=program_ids)
     if stream:
         slot_filter &= (Q(stream=stream) | Q(stream=""))
 
