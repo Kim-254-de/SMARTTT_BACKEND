@@ -109,9 +109,9 @@ class TimetableSlotViewSet(ModelViewSet):
 
         Moves a class to a new day/time/room. Callable by admins/registrar/
         department admins for any slot, or by a lecturer for a slot they
-        teach. Rejects the change if it collides with another class already
-        booked in that room at the new day/time, and — on success — notifies
-        every student enrolled in the unit this term.
+        teach. A room already booked by another class at the new day/time is
+        NOT rejected (rooms may be shared/double-booked by design); on
+        success every student enrolled in the unit this term is notified.
         """
         slot = self.get_object()  # runs CanRescheduleTimetableSlot.has_object_permission
 
@@ -124,26 +124,6 @@ class TimetableSlotViewSet(ModelViewSet):
         new_end = data.get("end_time", slot.end_time)
         new_room = data.get("room", slot.room)
         reason = data.get("reason", "")
-
-        conflict = (
-            TimetableSlot.objects.filter(term=slot.term_id, day_of_week=new_day, room=new_room)
-            .exclude(pk=slot.pk)
-            .filter(start_time__lt=new_end, end_time__gt=new_start)
-            .select_related("unit")
-            .first()
-        )
-        if conflict:
-            return Response(
-                {
-                    "detail": (
-                        f"{new_room.code} is already booked on "
-                        f"{conflict.get_day_of_week_display()} "
-                        f"{conflict.start_time:%H:%M}-{conflict.end_time:%H:%M} "
-                        f"for {conflict.unit.code if conflict.unit else 'another class'}."
-                    )
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
 
         old_day, old_start, old_end, old_room = (
             slot.day_of_week, slot.start_time, slot.end_time, slot.room,
