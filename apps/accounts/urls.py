@@ -11,7 +11,10 @@ from .views.auth_views import (
     PasswordResetRequestView,
     ProfileView,
     RegisterView,
+    StaffIDDeleteView,
     StaffIDListView,
+    StaffIDUploadDeleteView,
+    StaffIDUploadListView,
     StaffIDUploadView,
 )
 from .views.language_views import UpdateLanguageAPIView
@@ -30,5 +33,8 @@ urlpatterns = [
     path("lecturer/students/", LecturerStudentsView.as_view(), name="lecturer-students"),
     path("staff-ids/upload/", StaffIDUploadView.as_view(), name="staff-id-upload"),
     path("staff-ids/", StaffIDListView.as_view(), name="staff-id-list"),
+    path("staff-ids/uploads/", StaffIDUploadListView.as_view(), name="staff-id-upload-list"),
+    path("staff-ids/uploads/<uuid:pk>/", StaffIDUploadDeleteView.as_view(), name="staff-id-upload-delete"),
+    path("staff-ids/<uuid:pk>/", StaffIDDeleteView.as_view(), name="staff-id-delete"),
     path("language/", UpdateLanguageAPIView.as_view(), name="change-language"),
 ]

@@ -7,6 +7,13 @@ from apps.timetable.models import (
     TimetableSlot,
     TimetableUploadBatch,
 )
+from apps.timetable.services.allocation_matcher import display_lecturer
+
+
+def slot_lecturer_display(slot) -> str:
+    """Linked account name and/or allocated name, keeping co-taught names together."""
+    account = slot.lecturer.user.get_full_name() if slot.lecturer and getattr(slot.lecturer, "user", None) else ""
+    return display_lecturer(account, getattr(slot, "lecturer_name_text", "") or "")
 
 
 class AcademicTermSerializer(serializers.ModelSerializer):
@@ -119,18 +126,7 @@ class TimetableSlotDetailedSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "created_at", "updated_at")
 
     def get_lecturer_display(self, obj) -> str:
-        if obj.lecturer and hasattr(obj.lecturer, "user") and obj.lecturer.user:
-            name = obj.lecturer.user.get_full_name().strip()
-            if name:
-                return name
-        return getattr(obj, "lecturer_name_text", "") or ""
-
-    def get_lecturer_display(self, obj) -> str:
-        if obj.lecturer and hasattr(obj.lecturer, "user") and obj.lecturer.user:
-            name = obj.lecturer.user.get_full_name().strip()
-            if name:
-                return name
-        return getattr(obj, "lecturer_name_text", "") or ""
+        return slot_lecturer_display(obj)
 
 
 class TimetableSlotSerializer(serializers.ModelSerializer):
@@ -175,13 +171,7 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "created_at")
 
     def get_instructor(self, obj) -> str:
-        # 1. First check if a registered Lecturer user account exists
-        if obj.lecturer and hasattr(obj.lecturer, "user") and obj.lecturer.user:
-            name = obj.lecturer.user.get_full_name().strip()
-            if name:
-                return name
-        # 2. Fall back to the name parsed from the .docx file!
-        return getattr(obj, "lecturer_name_text", "") or ""
+        return slot_lecturer_display(obj)
 
     def get_lecturer_display(self, obj) -> str:
         return self.get_instructor(obj)

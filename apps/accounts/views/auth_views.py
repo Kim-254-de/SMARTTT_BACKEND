@@ -571,12 +571,22 @@ class LecturerRegisterView(APIView):
         try:
             valid_staff = ValidStaffID.objects.get(staff_id__iexact=staff_id)
         except ValidStaffID.DoesNotExist:
-            return Response({"detail": "Staff ID not found. Please contact the university ICT department."}, status=400)
+            return Response(
+                {"detail": "This staff ID does not exist on the approved staff list. "
+                           "Please contact the university ICT department."},
+                status=400,
+            )
 
-        if valid_staff.is_claimed:
+        # Claimed means an active account is actually using the ID. The flag alone
+        # can be stale, e.g. after the lecturer deleted their own account.
+        if User.objects.filter(university_id__iexact=staff_id, is_active=True).exists():
             return Response({"detail": "This staff ID has already been registered. Contact ICT if this is an error."}, status=400)
 
-        if User.objects.filter(email=email).exists():
+        existing = User.objects.filter(email=email).first()
+        # A lecturer whose staff ID the admin removed and then re-added registers
+        # again into their old (disabled) account, keeping their timetable links.
+        restorable = existing and not existing.is_active and existing.role == User.Role.LECTURER and not existing.university_id
+        if existing and not restorable:
             return Response({"detail": "Email already registered."}, status=400)
 
         department = None
@@ -587,17 +597,26 @@ class LecturerRegisterView(APIView):
                 pass
 
         parts = full_name.split(" ", 1)
-        user = User.objects.create_user(
-            username=email,
-            email=email,
-            password=password,
-            first_name=parts[0],
-            last_name=parts[1] if len(parts) > 1 else "",
-            university_id=staff_id,
-            role=User.Role.LECTURER,
-        )
+        if restorable:
+            user = existing
+            user.set_password(password)
+            user.first_name = parts[0]
+            user.last_name = parts[1] if len(parts) > 1 else ""
+            user.university_id = staff_id
+            user.is_active = True
+            user.save()
+        else:
+            user = User.objects.create_user(
+                username=email,
+                email=email,
+                password=password,
+                first_name=parts[0],
+                last_name=parts[1] if len(parts) > 1 else "",
+                university_id=staff_id,
+                role=User.Role.LECTURER,
+            )
 
-        if department:
+        if department and not Lecturer.objects.filter(user=user).exists():
             Lecturer.objects.create(user=user, department=department, rank="")
 
         valid_staff.is_claimed = True
@@ -614,31 +633,40 @@ class StaffIDUploadView(APIView):
         import csv
         import io
 
-        from apps.accounts.models import ValidStaffID
+        from apps.accounts.models import StaffIDUpload, ValidStaffID
 
         file = request.FILES.get("file")
         if not file:
             return Response({"detail": "No file provided."}, status=400)
 
         try:
-            content = file.read().decode("utf-8")
-            reader = csv.reader(io.StringIO(content))
+            # utf-8-sig: Excel-saved CSVs start with a BOM that would hide the header row.
+            content = file.read().decode("utf-8-sig")
+            rows = list(csv.reader(io.StringIO(content)))
+        except Exception as exc:
+            return Response({"detail": f"Could not parse CSV: {exc}"}, status=400)
+
+        with transaction.atomic():
+            upload = StaffIDUpload.objects.create(file_name=file.name, uploaded_by=request.user)
             created = 0
             skipped = 0
-            for row in reader:
+            for row in rows:
                 if not row:
                     continue
                 staff_id = row[0].strip()
                 if not staff_id or staff_id.lower() == "staff_id":
                     continue
                 name_hint = row[1].strip() if len(row) > 1 else ""
-                _, was_created = ValidStaffID.objects.get_or_create(staff_id=staff_id, defaults={"name_hint": name_hint})
+                _, was_created = ValidStaffID.objects.get_or_create(
+                    staff_id=staff_id, defaults={"name_hint": name_hint, "upload": upload}
+                )
                 if was_created:
                     created += 1
                 else:
                     skipped += 1
-        except Exception as exc:
-            return Response({"detail": f"Could not parse CSV: {exc}"}, status=400)
+            upload.ids_created = created
+            upload.ids_skipped = skipped
+            upload.save(update_fields=["ids_created", "ids_skipped"])
 
         return Response({"detail": f"Uploaded {created} new staff ID(s). {skipped} already existed."})
 
@@ -647,10 +675,106 @@ class StaffIDListView(APIView):
     permission_classes = [IsAdminUser]
 
     def get(self, request):
+        from django.db.models import F
+
         from apps.accounts.models import ValidStaffID
 
-        ids = ValidStaffID.objects.all().values("staff_id", "name_hint", "is_claimed", "uploaded_at")
+        ids = ValidStaffID.objects.annotate(file_name=F("upload__file_name")).values(
+            "id", "staff_id", "name_hint", "is_claimed", "uploaded_at", "file_name"
+        )
         return Response(list(ids))
+
+
+def revoke_staff_ids(staff_ids) -> tuple[int, int]:
+    """
+    Removes staff IDs from the approved list. A lecturer account registered with
+    a removed ID is disabled (it can no longer sign in, and existing tokens stop
+    working) and releases the ID, so registering with it afterwards is refused
+    as an unknown staff ID. The account itself is kept, not deleted, so its
+    timetable links survive if the admin re-adds the ID and the lecturer
+    registers again with the same email.
+    Returns (ids_removed, accounts_disabled).
+    """
+    codes = list(staff_ids.values_list("staff_id", flat=True))
+    lookup = Q()
+    for code in codes:
+        lookup |= Q(university_id__iexact=code)
+    disabled = 0
+    if codes:
+        disabled = User.objects.filter(lookup, role=User.Role.LECTURER).update(is_active=False, university_id=None)
+    removed, _ = staff_ids.delete()
+    return removed, disabled
+
+
+class StaffIDDeleteView(APIView):
+    """Removes one staff ID and disables the lecturer account registered with it."""
+    permission_classes = [IsAdminUser]
+
+    @transaction.atomic
+    def delete(self, request, pk):
+        from apps.accounts.models import ValidStaffID
+
+        removed, disabled = revoke_staff_ids(ValidStaffID.objects.filter(pk=pk))
+        if not removed:
+            return Response({"detail": "Staff ID not found."}, status=404)
+        detail = "Staff ID removed."
+        if disabled:
+            detail += " The lecturer account registered with it has been disabled."
+        return Response({"detail": detail, "accounts_disabled": disabled})
+
+
+class StaffIDUploadListView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        from django.db.models import Count, Q as DQ
+
+        from apps.accounts.models import StaffIDUpload, ValidStaffID
+
+        uploads = StaffIDUpload.objects.select_related("uploaded_by").annotate(
+            ids_remaining=Count("staff_ids"),
+            ids_claimed=Count("staff_ids", filter=DQ(staff_ids__is_claimed=True)),
+        )
+        data = [
+            {
+                "id": u.id,
+                "file_name": u.file_name,
+                "ids_created": u.ids_created,
+                "ids_skipped": u.ids_skipped,
+                "ids_remaining": u.ids_remaining,
+                "ids_claimed": u.ids_claimed,
+                "uploaded_by": u.uploaded_by.get_full_name() or u.uploaded_by.username if u.uploaded_by else None,
+                "uploaded_at": u.uploaded_at,
+            }
+            for u in uploads
+        ]
+        return Response({
+            "uploads": data,
+            # IDs loaded before uploads were tracked belong to no upload.
+            "untracked_ids": ValidStaffID.objects.filter(upload__isnull=True).count(),
+        })
+
+
+class StaffIDUploadDeleteView(APIView):
+    """
+    Undoes a staff-ID CSV upload: every ID it added is removed, and lecturer
+    accounts registered with those IDs are disabled (see revoke_staff_ids).
+    """
+    permission_classes = [IsAdminUser]
+
+    def delete(self, request, pk):
+        from apps.accounts.models import StaffIDUpload
+
+        upload = StaffIDUpload.objects.filter(pk=pk).first()
+        if not upload:
+            return Response({"detail": "Upload not found."}, status=404)
+        with transaction.atomic():
+            removed, disabled = revoke_staff_ids(upload.staff_ids.all())
+            upload.delete()
+        detail = f"Removed {removed} staff ID(s) from {upload.file_name}."
+        if disabled:
+            detail += f" Disabled {disabled} lecturer account(s) registered with them."
+        return Response({"detail": detail, "removed": removed, "accounts_disabled": disabled})
 
 
 class LecturerProfileView(APIView):
@@ -717,7 +841,11 @@ class LecturerProfileView(APIView):
                 student_count_by_unit: dict = {}
 
                 for slot in assigned_slots:
-                    if slot.lecturer_id != lecturer_profile.id:
+                    # Only claim slots with no linked account yet. A co-taught class
+                    # ("Luke Mwema / Kevin Tuei") already linked to the co-lecturer
+                    # still shows here through the name match, but must not flip
+                    # its account to whoever opened their dashboard last.
+                    if slot.lecturer_id is None:
                         slot.lecturer = lecturer_profile
                         slot.save(update_fields=["lecturer"])
 

@@ -82,6 +82,15 @@ class TimetableSlot(BaseModel):
                   "Lecturer account exists yet (e.g. parsed from a document "
                   "but not yet matched to a registered account).",
     )
+    allocation_document = models.ForeignKey(
+        "timetable.AllocationDocument",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assigned_slots",
+        help_text="Department allocation document whose row currently sets this "
+                  "slot's lecturer; blank when set by hand or not yet allocated.",
+    )
     room = models.ForeignKey(
         "rooms.Room",
         on_delete=models.PROTECT,

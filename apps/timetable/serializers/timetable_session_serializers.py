@@ -4,6 +4,7 @@ from django.utils.translation import gettext_lazy as _
 from apps.timetable.models import TimetableSession
 from apps.units.serializers import UnitSerializer
 from apps.timetable.models import TimetableSlot
+from apps.timetable.services.allocation_matcher import display_lecturer
 from apps.lecturers.serializers import LecturerSerializer
 from apps.programs.serializers import ProgramSerializer
 from apps.departments.serializers import DepartmentSerializer
@@ -49,32 +50,29 @@ class TimetableSessionListSerializer(serializers.ModelSerializer):
         ]
 
     def get_lecturer_name(self, obj) -> str:
-        # 1. Registered lecturer account
-        if obj.lecturer and hasattr(obj.lecturer, "user") and obj.lecturer.user:
-            name = obj.lecturer.user.get_full_name().strip()
-            if name:
-                return name
+        # 1. Registered lecturer account / text saved on the session itself
+        account = obj.lecturer.user.get_full_name() if obj.lecturer and getattr(obj.lecturer, "user", None) else ""
+        own = display_lecturer(account, getattr(obj, "lecturer_name_text", "") or "")
+        if own:
+            return own
 
-        # 2. Check if text was saved directly
-        if getattr(obj, "lecturer_name_text", None):
-            return obj.lecturer_name_text
-
-        # 3. Match from the TimetableSlot where the Word allocation doc populated names!
-        slot = TimetableSlot.objects.filter(
+        # 2. The master-timetable class of the same unit for the same programme and
+        #    year, where the department allocation set the lecturer. A unit shared by
+        #    several programmes/groups has different lecturers, so only answer when
+        #    the matching classes agree on one name.
+        slots = TimetableSlot.objects.filter(
             unit_id=obj.unit_id,
-            day_of_week=obj.day_of_week,
-        ).exclude(lecturer_name_text="").first()
-
-        if slot and slot.lecturer_name_text:
-            return slot.lecturer_name_text
-
-        # Fallback to any slot for this unit with a lecturer name
-        fallback_slot = TimetableSlot.objects.filter(
-            unit_id=obj.unit_id
-        ).exclude(lecturer_name_text="").first()
-        if fallback_slot and fallback_slot.lecturer_name_text:
-            return fallback_slot.lecturer_name_text
-
+            program_id=obj.program_id,
+            year_of_study=obj.study_year,
+            term__academic_year=obj.academic_year,
+            term__semester=obj.semester,
+        ).exclude(lecturer_name_text="")
+        for candidates in (slots.filter(day_of_week__iexact=obj.day_of_week), slots):
+            names = set(candidates.values_list("lecturer_name_text", flat=True).distinct())
+            if len(names) == 1:
+                return names.pop()
+            if names:
+                return None
         return None
 
     def get_time_range(self, obj) -> str:

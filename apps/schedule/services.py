@@ -18,6 +18,7 @@ from apps.courses.models import StudentUnit
 from apps.programs.models import Program
 from apps.programs.utils import canonical_program_key
 from apps.timetable.models import AcademicTerm, TimetableSlot
+from apps.timetable.services.allocation_matcher import display_lecturer
 from apps.timetable.utils.day_order import day_of_week_sort_case
 
 DAY_ORDER = ["MON", "TUE", "WED", "THU", "FRI", "SAT"]
@@ -286,17 +287,15 @@ def _serialise_slot(slot: TimetableSlot) -> dict:
     # Use real unit title if available, otherwise fallback to slot.unit.name
     unit_title = slot.unit.name if slot.unit and slot.unit.name != unit_code else unit_code
 
-    # 1. Registered lecturer FK
-    lecturer_name = None
+    # Registered lecturer account and/or the name from the department allocation
+    account_name = ""
     if slot.lecturer and hasattr(slot.lecturer, "user") and slot.lecturer.user:
-        lecturer_name = slot.lecturer.user.get_full_name().strip()
-
-    # 2. Text name from Word allocation
-    if not lecturer_name:
-        candidate = getattr(slot, "lecturer_name_text", "") or ""
-        # GUARD: Ensure candidate is not just the course title or course code!
-        if candidate and candidate.strip().lower() != unit_title.strip().lower() and candidate.strip().lower() != unit_code.strip().lower():
-            lecturer_name = candidate.strip()
+        account_name = slot.lecturer.user.get_full_name().strip()
+    candidate = (getattr(slot, "lecturer_name_text", "") or "").strip()
+    # GUARD: Ensure candidate is not just the course title or course code!
+    if candidate.lower() in {unit_title.strip().lower(), unit_code.strip().lower()}:
+        candidate = ""
+    lecturer_name = display_lecturer(account_name, candidate) or None
 
     return {
         "id": str(slot.id),
