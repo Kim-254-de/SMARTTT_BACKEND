@@ -135,6 +135,7 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
     subject = serializers.CharField(source="unit.name", read_only=True)
     instructor = serializers.SerializerMethodField()
     location = serializers.CharField(source="room.code", read_only=True)
+    unit_code = serializers.CharField(source="unit.code", read_only=True)
 
     curriculum_unit_display = serializers.CharField(
         source="unit.__str__",
@@ -167,6 +168,7 @@ class TimetableSlotSerializer(serializers.ModelSerializer):
             "subject",
             "instructor",
             "location",
+            "unit_code",
         )
         read_only_fields = ("id", "created_at")
 
