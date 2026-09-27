@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     "apps.timetable",
     "apps.units",
     "apps.courses",
+    "apps.integrations",
 ]
 
 MIDDLEWARE = [
@@ -122,6 +123,10 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+
+# Shared secret the Smart Attendance backend sends as X-API-Key to
+# /api/v1/integrations/attendance/. Unset = the integration endpoints refuse everything.
+ATTENDANCE_API_KEY = os.getenv("ATTENDANCE_API_KEY", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@nextup.co.ke")
 FRONTEND_RESET_PASSWORD_URL = os.getenv(
     "FRONTEND_RESET_PASSWORD_URL",

@@ -788,6 +788,7 @@ class LecturerProfileView(APIView):
 
         from apps.courses.models import StudentUnit
         from apps.departments.models import Department
+        from apps.integrations.services import group_key, registered_count
         from apps.lecturers.models import Lecturer
         from apps.timetable.models import AcademicTerm, TimetableSlot
 
@@ -810,6 +811,7 @@ class LecturerProfileView(APIView):
         today_sessions = []
         weekly_sessions = 0
         unit_ids_taught: set = set()
+        classes_taught: set = set()  # (unit_id, group key); "" = the whole unit
 
         if term:
             lecturer_profile, _ = Lecturer.objects.get_or_create(
@@ -837,8 +839,11 @@ class LecturerProfileView(APIView):
             if assigned_slots.exists():
                 slot_source = "assigned"
                 seen_signatures = set()
-                # unit_id -> distinct StudentUnit count this term, computed once per unit
-                student_count_by_unit: dict = {}
+                # (unit_id, group) -> students registered for that class this term,
+                # computed once per class. A unit split into groups (COSC 103
+                # GR A / GR B ...) counts only the slot's own group, so each
+                # group's lecturer sees their group, not the whole unit.
+                student_count_by_class: dict = {}
 
                 for slot in assigned_slots:
                     # Only claim slots with no linked account yet. A co-taught class
@@ -878,11 +883,15 @@ class LecturerProfileView(APIView):
                         unit_ids_taught.add(slot.unit_id)
                         units_by_id.setdefault(unit_id, {"id": unit_id, "code": unit_code, "name": unit_name})
 
-                        if slot.unit_id not in student_count_by_unit:
-                            student_count_by_unit[slot.unit_id] = StudentUnit.objects.filter(
-                                unit_id=slot.unit_id, term=term
-                            ).count()
-                    student_count = student_count_by_unit.get(slot.unit_id, 0)
+                        class_key = (slot.unit_id, group_key(slot.class_group))
+                        classes_taught.add(class_key)
+                        if class_key not in student_count_by_class:
+                            student_count_by_class[class_key] = registered_count(
+                                term, slot.unit_id, slot.class_group
+                            )
+                    student_count = student_count_by_class.get(
+                        (slot.unit_id, group_key(slot.class_group)), 0
+                    )
 
                     session = {
                         "id": str(slot.id),
@@ -915,11 +924,17 @@ class LecturerProfileView(APIView):
             timetable[day].sort(key=lambda s: s["start_time"])
         today_sessions.sort(key=lambda s: s["start_time"])
 
-        total_students = (
-            StudentUnit.objects.filter(unit_id__in=unit_ids_taught, term=term)
-            .values("user_id").distinct().count()
-            if unit_ids_taught and term else 0
-        )
+        total_students = 0
+        if unit_ids_taught and term:
+            whole_units = {uid for uid, key in classes_taught if not key}
+            taught_students = {
+                user_id
+                for unit_id, user_id, class_group in StudentUnit.objects.filter(
+                    unit_id__in=unit_ids_taught, term=term
+                ).values_list("unit_id", "user_id", "class_group")
+                if unit_id in whole_units or (unit_id, group_key(class_group)) in classes_taught
+            }
+            total_students = len(taught_students)
         completed_today = sum(1 for s in today_sessions if s["status"] == "completed")
         remaining_today = len(today_sessions) - completed_today
 
