@@ -1,6 +1,7 @@
 from datetime import timedelta
 import re
 import secrets
+from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.auth import authenticate
@@ -421,7 +422,7 @@ class PasswordResetRequestView(APIView):
         expires_at = timezone.now() + timedelta(minutes=15)
         PasswordResetToken.objects.create(user=user, token=token, expires_at=expires_at)
 
-        reset_url = f'https://nextup.co.ke/reset-password.html?token={token}'
+        reset_url = f"{settings.FRONTEND_RESET_PASSWORD_URL}?{urlencode({'token': token})}"
 
         try:
             resend.Emails.send({
