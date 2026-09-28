@@ -10,13 +10,16 @@ if [ -n "$POSTGRES_HOST" ]; then
     echo "PostgreSQL is ready."
 fi
 
-# Apply database migrations
-echo "Applying database migrations..."
-python manage.py migrate --noinput
+# Set SKIP_SETUP=1 for one-off/cron services that share this image
+if [ "$SKIP_SETUP" != "1" ]; then
+    # Apply database migrations
+    echo "Applying database migrations..."
+    python manage.py migrate --noinput
 
-# Collect static files
-echo "Collecting static files..."
-python manage.py collectstatic --noinput
+    # Collect static files
+    echo "Collecting static files..."
+    python manage.py collectstatic --noinput
+fi
 
 echo "Starting application with command: $@"
 exec "$@"

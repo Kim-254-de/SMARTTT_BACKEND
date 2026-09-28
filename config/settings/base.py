@@ -18,6 +18,13 @@ ALLOWED_HOSTS = [
     for h in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
     if h.strip()
 ]
+# Railway exposes the service's generated domain; allow it automatically
+RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+if RAILWAY_PUBLIC_DOMAIN:
+    ALLOWED_HOSTS.append(RAILWAY_PUBLIC_DOMAIN)
+# Railway's deploy healthcheck probes from this host
+if os.getenv("RAILWAY_ENVIRONMENT"):
+    ALLOWED_HOSTS.append("healthcheck.railway.app")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -181,6 +188,8 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken",
 ]
 CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS")
+if RAILWAY_PUBLIC_DOMAIN:
+    CSRF_TRUSTED_ORIGINS.append(f"https://{RAILWAY_PUBLIC_DOMAIN}")
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 PORTAL_URL = os.getenv("PORTAL_URL", "https://students.tharaka.ac.ke/")
