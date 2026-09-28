@@ -234,3 +234,59 @@ def _roster(registrations: list[StudentUnit]) -> list[dict]:
             name = f"{profile.first_name} {profile.last_name}".strip()
         by_number[number] = {"registration_number": number, "full_name": name or None}
     return sorted(by_number.values(), key=lambda s: s["registration_number"])
+
+
+# ---------------------------------------------------------------------------
+# Student lookup, for Smart Attendance student registration
+# ---------------------------------------------------------------------------
+
+_INACTIVE_STUDENT_STATUSES = {"inactive", "suspended", "graduated", "withdrawn"}
+
+
+def find_student(registration_number: str) -> dict | None:
+    """
+    The student with this registration number, as the attendance system needs
+    to verify a registration: their name and email on record here, programme,
+    and whether they are a current student. None when SMARTTT has no such
+    student.
+
+    The registration number is the student's login id (User.university_id),
+    falling back to their Student profile's registration_number, the same
+    order the roster uses (_roster above).
+    """
+    number = (registration_number or "").strip()
+    if not number:
+        return None
+
+    user = (
+        User.objects.filter(role=User.Role.STUDENT, university_id__iexact=number)
+        .select_related("student_profile", "student_profile__program")
+        .first()
+    )
+    profile = getattr(user, "student_profile", None) if user else None
+    if user is None:
+        from apps.students.models import Student
+
+        profile = (
+            Student.objects.filter(registration_number__iexact=number)
+            .select_related("user", "program")
+            .first()
+        )
+        user = profile.user if profile else None
+    if user is None:
+        return None
+
+    name = user.get_full_name().strip()
+    if not name and profile:
+        name = f"{profile.first_name} {profile.last_name}".strip()
+    email = (user.email or (profile.email if profile else "") or "").strip().lower()
+    status = (profile.academic_status if profile else "active") or "active"
+
+    return {
+        "registration_number": (user.university_id or (profile.registration_number if profile else number)).strip().upper(),
+        "full_name": name or None,
+        "email": email or None,
+        "programme": profile.program.name if profile and profile.program_id else None,
+        "year_of_study": profile.current_study_year if profile else None,
+        "is_active": bool(user.is_active) and status not in _INACTIVE_STUDENT_STATUSES,
+    }
