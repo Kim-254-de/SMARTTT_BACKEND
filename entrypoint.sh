@@ -16,9 +16,7 @@ if [ "$SKIP_SETUP" != "1" ]; then
     echo "Applying database migrations..."
     python manage.py migrate --noinput
 
-    # Collect static files
-    echo "Collecting static files..."
-    python manage.py collectstatic --noinput
+    # Static files are collected at build time (see Dockerfile)
 
     # Create the admin superuser if DJANGO_SUPERUSER_EMAIL/PASSWORD are set
     python manage.py create_admin

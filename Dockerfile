@@ -33,6 +33,10 @@ RUN sed -i 's/\r$//g' /entrypoint.sh && \
 # Copy project source code
 COPY . /app/
 
+# Collect (and compress) static files at build time so container startup
+# stays well inside the platform's healthcheck window
+RUN DJANGO_SETTINGS_MODULE=config.settings.production python manage.py collectstatic --noinput
+
 # Create non-root user and setup directories with appropriate permissions
 RUN useradd -m -u 1000 appuser && \
     mkdir -p /app/staticfiles /app/media && \
