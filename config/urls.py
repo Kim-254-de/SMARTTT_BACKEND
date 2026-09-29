@@ -1,5 +1,7 @@
+from django.conf import settings
 from django.contrib import admin
-from django.urls import include, path
+from django.urls import include, path, re_path
+from django.views.static import serve
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -16,4 +18,6 @@ urlpatterns = [
     path("api/v1/schedule/", include("apps.schedule.urls")),
     path("api/v1/notifications/", include("apps.notifications.urls")),
     path("api/v1/integrations/", include("apps.integrations.urls")),
+    # No Nginx in front on Railway, so Django serves uploads from the volume
+    re_path(r"^media/(?P<path>.*)$", serve, {"document_root": settings.MEDIA_ROOT}),
 ]
