@@ -19,6 +19,9 @@ if [ "$SKIP_SETUP" != "1" ]; then
     # Collect static files
     echo "Collecting static files..."
     python manage.py collectstatic --noinput
+
+    # Create the admin superuser if DJANGO_SUPERUSER_EMAIL/PASSWORD are set
+    python manage.py create_admin
 fi
 
 echo "Starting application with command: $@"
