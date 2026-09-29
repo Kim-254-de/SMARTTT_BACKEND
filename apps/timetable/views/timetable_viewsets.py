@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from django.conf import settings
+from django.db import transaction
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -49,6 +50,18 @@ class AcademicTermViewSet(ModelViewSet):
     ordering_fields = ["-academic_year", "-semester", "is_current"]
     ordering = ["-academic_year", "-semester"]
     pagination_class = StandardResultsSetPagination
+
+    @action(detail=True, methods=["post"], url_path="set-current")
+    def set_current(self, request, pk=None):
+        term = self.get_object()
+        with transaction.atomic():
+            AcademicTerm.objects.filter(is_current=True).exclude(pk=term.pk).update(is_current=False)
+            term.is_current = True
+            term.save(update_fields=["is_current"])
+        return Response(
+            {"detail": f"{term} is now the current term."},
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["delete"], url_path="clear-slots")
     def clear_slots(self, request, pk=None):
