@@ -21,6 +21,9 @@ class Room(BaseModel):
     building = models.CharField(max_length=255)
     floor = models.CharField(max_length=20, blank=True)
     capacity = models.PositiveIntegerField()
+    # False while `capacity` is only a placeholder (e.g. rooms auto-created by a
+    # timetable upload). Set once an admin records the real figure.
+    capacity_confirmed = models.BooleanField(default=False)
     room_type = models.CharField(max_length=30, choices=Type.choices, default=Type.LECTURE_HALL)
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.ACTIVE)
     description = models.TextField(blank=True)

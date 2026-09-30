@@ -29,6 +29,7 @@ from apps.timetable.serializers import (
     TimetableUploadBatchDetailedSerializer,
 )
 from apps.timetable.permissions import CanManageTimetable, CanRescheduleTimetableSlot
+from apps.timetable.services.allocation_service import resolve_academic_year
 from apps.timetable.services.background_worker import dispatch_async_upload
 from apps.timetable.services.reschedule_notifications import notify_students_of_reschedule
 from apps.timetable.validators import ExcelFileValidator
@@ -268,7 +269,8 @@ class TimetableUploadAPIView(APIView):
             )
 
         upload_batch = serializer.save(status="processing")
-        academic_year = request.data.get("academic_year", "2026/2027")
+        # Same default as the allocation upload, so lecturers land on these slots.
+        academic_year = request.data.get("academic_year") or resolve_academic_year() or "2026/2027"
 
         # Spawn daemon worker thread
         dispatch_async_upload(upload_batch, saved_file_path, academic_year=academic_year)

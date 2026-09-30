@@ -1,9 +1,11 @@
 import os
+import shutil
 import tempfile
 from datetime import date, time
+from unittest import mock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from django.urls import reverse
 from docx import Document
 from rest_framework.test import APITestCase
@@ -13,13 +15,16 @@ from apps.departments.models import Department, Faculty
 from apps.lecturers.models import Lecturer
 from apps.programs.models import Program
 from apps.rooms.models import Room
-from apps.timetable.models import AcademicTerm, AllocationDocument, TimetableSlot
+from apps.timetable.models import AcademicTerm, AllocationDocument, TimetableSlot, TimetableUploadBatch
+from apps.timetable.services import background_worker
 from apps.timetable.services.allocation_matcher import (
     SlotRef,
     display_lecturer,
     plan_assignments,
     program_matches_heading,
 )
+from apps.timetable.services.allocation_service import reapply_allocations
+from apps.timetable.services.persistence import TimetablePersistenceService
 from apps.timetable.services.allocation_parser import (
     clean_lecturer_name,
     parse_allocation_docx,
@@ -312,3 +317,50 @@ class AssignLecturersAPITests(APITestCase):
         self.assertEqual(res.status_code, 200, res.data)
         self.assertEqual(self._names()["BED.ENG/LIT"], "")
         self.assertEqual(self._names()["BED.KISW/RELI"], "Michael Mutisya")
+
+    def test_allocation_uploaded_before_timetable_is_applied_when_timetable_arrives(self):
+        TimetableSlot.objects.all().delete()
+        data = self._post([COSC_ROW_A, COSC_ROW_B])
+        self.assertTrue(data["awaiting_timetable"])
+        self.assertEqual(AllocationDocument.objects.count(), 1)
+
+        # The master timetable upload's background worker creates slots with no lecturer.
+        def save_rows(_self, upload_batch, rows):
+            for program, day in [(self.eng, "mon"), (self.kisw, "tue")]:
+                TimetableSlot.objects.create(
+                    term=self.term, unit=self.unit, program=program, year_of_study=1, room=self.room,
+                    day_of_week=day, start_time=time(7), end_time=time(9),
+                )
+            return [None, None], []
+
+        batch = TimetableUploadBatch.objects.create(uploaded_by=self.admin, status="processing")
+        with mock.patch.object(background_worker, "connection"), \
+                mock.patch.object(background_worker, "parse_pdf"), \
+                mock.patch.object(background_worker, "to_timetable_slot_dicts", return_value=[{}, {}]), \
+                mock.patch.object(TimetablePersistenceService, "save_rows", save_rows):
+            background_worker._process_timetable_async(str(batch.id), "/nonexistent.pdf", academic_year="2026/2027")
+
+        self.assertEqual(self._names(), {"BED.ENG/LIT": "Joseph Mutwiri", "BED.KISW/RELI": "Michael Mutisya"})
+
+    def test_reuploaded_timetable_gets_existing_allocations_back(self):
+        self._post([COSC_ROW_A])
+        TimetableSlot.objects.all().delete()
+        fresh = TimetableSlot.objects.create(
+            term=self.term, unit=self.unit, program=self.eng, year_of_study=1, room=self.room,
+            day_of_week="mon", start_time=time(7), end_time=time(9),
+        )
+        reapply_allocations("2026/2027")
+        fresh.refresh_from_db()
+        self.assertEqual(fresh.lecturer_name_text, "Joseph Mutwiri")
+        self.assertEqual(fresh.lecturer_id, self.mutwiri.id)
+
+    def test_timetable_upload_defaults_to_current_term_year(self):
+        AcademicTerm.objects.filter(pk=self.term.pk).update(academic_year="2027/2028")
+        upload = SimpleUploadedFile("master.pdf", b"%PDF-1.4", content_type="application/pdf")
+        base_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base_dir, ignore_errors=True)
+        with override_settings(BASE_DIR=base_dir), \
+                mock.patch("apps.timetable.views.timetable_viewsets.dispatch_async_upload") as dispatch:
+            res = self.client.post(reverse("timetable-upload"), {"file": upload}, format="multipart")
+        self.assertEqual(res.status_code, 202, getattr(res, "data", res))
+        self.assertEqual(dispatch.call_args.kwargs["academic_year"], "2027/2028")
