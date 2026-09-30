@@ -1,0 +1,47 @@
+From 39d7201c73f61041b36215ac7034021bfdf63529 Mon Sep 17 00:00:00 2001
+From: Peter Kamami <peterkamami496@gmail.com>
+Date: Wed, 30 Sep 2026 18:08:09 +0300
+Subject: [PATCH] Add ATTENDANCE_API_KEY to the env examples
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01MKtx9SS2GuCYU7oVG3uhYj
+---
+ .env.example            | 8 ++++++++
+ .env.production.example | 8 ++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/.env.example b/.env.example
+index 7ffd5ba..e1f8f39 100644
+--- a/.env.example
++++ b/.env.example
+@@ -11,3 +11,11 @@ CORS_ALLOWED_ORIGINS=https://smart-timetable-8f116.web.app
+ CSRF_TRUSTED_ORIGINS=https://nextup.co.ke,https://www.nextup.co.ke
+ FRONTEND_RESET_PASSWORD_URL=https://smart-timetable-8f116.web.app/reset-password
+ DEFAULT_FROM_EMAIL=noreply@nextup.co.ke
++
++# --- Smart Attendance integration ---
++# Shared secret the Smart Attendance backend sends in the X-API-Key header when
++# it calls /api/v1/integrations/attendance/*. SMARTTT checks every request
++# against this value. Set the SAME value as SMARTTT_API_KEY in the attendance
++# backend's environment. Leave empty to refuse all attendance requests.
++# Generate with: python -c 'import secrets; print(secrets.token_urlsafe(48))'
++ATTENDANCE_API_KEY=
+diff --git a/.env.production.example b/.env.production.example
+index c9c7b5e..89b5022 100644
+--- a/.env.production.example
++++ b/.env.production.example
+@@ -46,3 +46,11 @@ PORTAL_UNITS_URL=https://students.tharaka.ac.ke/pages/SemesterUnitsRegistration
+ # --- Backup sync (VPS -> Railway), used by scripts/sync_db_to_railway.sh ---
+ # Railway Postgres DATABASE_PUBLIC_URL
+ RAILWAY_DATABASE_URL=
++
++# --- Smart Attendance integration ---
++# Shared secret the Smart Attendance backend sends in the X-API-Key header when
++# it calls /api/v1/integrations/attendance/*. SMARTTT checks every request
++# against this value. Set the SAME value as SMARTTT_API_KEY in the attendance
++# backend's environment. Leave empty to refuse all attendance requests.
++# Generate with: python -c 'import secrets; print(secrets.token_urlsafe(48))'
++ATTENDANCE_API_KEY=
+-- 
+2.43.0
+
