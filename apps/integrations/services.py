@@ -255,24 +255,7 @@ def find_student(registration_number: str) -> dict | None:
     order the roster uses (_roster above).
     """
     number = (registration_number or "").strip()
-    if not number:
-        return None
-
-    user = (
-        User.objects.filter(role=User.Role.STUDENT, university_id__iexact=number)
-        .select_related("student_profile", "student_profile__program")
-        .first()
-    )
-    profile = getattr(user, "student_profile", None) if user else None
-    if user is None:
-        from apps.students.models import Student
-
-        profile = (
-            Student.objects.filter(registration_number__iexact=number)
-            .select_related("user", "program")
-            .first()
-        )
-        user = profile.user if profile else None
+    user, profile = _find_student_user(number)
     if user is None:
         return None
 
@@ -289,4 +272,202 @@ def find_student(registration_number: str) -> dict | None:
         "programme": profile.program.name if profile and profile.program_id else None,
         "year_of_study": profile.current_study_year if profile else None,
         "is_active": bool(user.is_active) and status not in _INACTIVE_STUDENT_STATUSES,
+    }
+
+
+def _find_student_user(number: str):
+    """
+    (user, Student profile or None) for a registration number: the login id
+    (User.university_id) first, then the Student profile's
+    registration_number. (None, None) when SMARTTT has no such student.
+    """
+    if not number:
+        return None, None
+    user = (
+        User.objects.filter(role=User.Role.STUDENT, university_id__iexact=number)
+        .select_related("student_profile", "student_profile__program")
+        .first()
+    )
+    if user is not None:
+        return user, getattr(user, "student_profile", None)
+
+    from apps.students.models import Student
+
+    profile = (
+        Student.objects.filter(registration_number__iexact=number)
+        .select_related("user", "program")
+        .first()
+    )
+    return (profile.user, profile) if profile else (None, None)
+
+
+# ---------------------------------------------------------------------------
+# A student's units, for the Smart Attendance student dashboard
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StudentUnits:
+    registration_number: str
+    term: AcademicTerm | None
+    units: list[dict] = field(default_factory=list)
+
+
+def get_student_units(registration_number: str) -> StudentUnits | None:
+    """
+    The classes a student is registered for this term (their StudentUnit
+    rows), in the same shape the lecturer side reports them, so the attendance
+    system can match each one to the unit its lecturer syncs: one entry per
+    section the student sits in, keyed by the same section code
+    ("COSC 103 GR A", or "COSC 103" when not split).
+
+    Mirrors get_lecturer_units' rosters: a MAIN section's roster is everyone
+    registered for the unit, and a group section's is those who picked that
+    group. So a student is in the unit's MAIN section when it has MAIN slots,
+    and in their group's section when they have picked one. A split unit
+    (only group slots) the student hasn't picked a group for yet is reported
+    once, without a group and with `group_required`, so they can be told to
+    pick one. A unit with no slots this term is reported as its plain code.
+
+    None when SMARTTT has no student with this registration number.
+    """
+    number = (registration_number or "").strip()
+    user, profile = _find_student_user(number)
+    if user is None:
+        return None
+
+    reg_number = (user.university_id or (profile.registration_number if profile else number)).strip().upper()
+    term = AcademicTerm.objects.filter(is_current=True).first()
+    result = StudentUnits(registration_number=reg_number, term=term)
+    if term is None:
+        return result
+
+    registrations = list(
+        StudentUnit.objects.filter(user=user, term=term).select_related("unit").order_by("unit__code")
+    )
+    slots_by_unit: dict[str, list[TimetableSlot]] = {}
+    for slot in (
+        TimetableSlot.objects.select_related("room", "program", "lecturer__user")
+        .filter(term=term, unit_id__in=[r.unit_id for r in registrations])
+        .order_by("day_of_week", "start_time")
+    ):
+        slots_by_unit.setdefault(str(slot.unit_id), []).append(slot)
+
+    sections: dict[str, dict] = {}
+    for reg in registrations:
+        unit = reg.unit
+        unit_slots = slots_by_unit.get(str(unit.id), [])
+        keys = {group_key(s.class_group) for s in unit_slots}
+        mine = group_key(reg.class_group)
+
+        wanted: list[str | None] = []  # the class_group label of each section; None for MAIN
+        if "" in keys or not keys:
+            wanted.append(None)
+        if mine and (mine in keys or "" not in keys and keys):
+            wanted.append(reg.class_group)
+        group_required = not mine and bool(keys) and "" not in keys
+        if group_required:
+            wanted.append(None)
+
+        for class_group in wanted:
+            gkey = group_key(class_group)
+            code = section_code(unit.code, class_group)
+            if code in sections:
+                continue
+            section_slots = [s for s in unit_slots if group_key(s.class_group) == gkey] if not group_required else []
+            sections[code] = {
+                "code": code,
+                "unit_code": unit.code,
+                "group": group_label(class_group) or None,
+                "name": unit.name,
+                "group_required": group_required,
+                "lecturers": _lecturer_names(section_slots),
+                "slots": _slot_list(section_slots),
+            }
+
+    result.units = sorted(sections.values(), key=lambda e: e["code"])
+    return result
+
+
+def _lecturer_names(slots: list[TimetableSlot]) -> list[str]:
+    """Who teaches these slots: the linked account's name, else the allocation document's."""
+    names: dict[str, str] = {}
+    for slot in slots:
+        name = ""
+        if slot.lecturer is not None and slot.lecturer.user is not None:
+            name = slot.lecturer.user.get_full_name().strip()
+        name = name or (slot.lecturer_name_text or "").strip()
+        if name:
+            names.setdefault(name.lower(), name)
+    return sorted(names.values())
+
+
+def _slot_list(slots: list[TimetableSlot]) -> list[dict]:
+    """Same slot shape as get_lecturer_units, de-duplicated and sorted Monday-first."""
+    seen: set[tuple] = set()
+    result = []
+    for slot in slots:
+        day = DAY_TO_INDEX.get((slot.day_of_week or "").strip().lower()[:3])
+        if day is None:
+            continue
+        signature = (day, slot.start_time, slot.end_time, slot.room_id)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        result.append({
+            "day_of_week": day,
+            "start_time": slot.start_time.strftime("%H:%M"),
+            "end_time": slot.end_time.strftime("%H:%M"),
+            "room": slot.room.code if slot.room else None,
+            "class_group": slot.class_group or "",
+            "program": slot.program.name if slot.program else None,
+        })
+    result.sort(key=lambda s: ((s["day_of_week"] + 6) % 7, s["start_time"]))
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Staff lookup, for Smart Attendance lecturer registration
+# ---------------------------------------------------------------------------
+
+
+def find_staff(staff_number: str) -> dict | None:
+    """
+    The lecturer with this staff number, as the attendance system needs to
+    verify a lecturer registration. None when the number isn't on the approved
+    staff list (accounts.ValidStaffID, the admin's staff-ID CSV uploads).
+
+    The approved list is the authority, the same one SMARTTT's own lecturer
+    registration checks: an admin removing an ID deletes it from the list (and
+    disables the account using it, see auth_views.revoke_staff_ids), so an ID
+    on the list is a current member of staff. The details come from the
+    lecturer's SMARTTT account when they have registered one, otherwise from
+    the name given in the CSV.
+    """
+    from apps.accounts.models import ValidStaffID
+
+    number = (staff_number or "").strip()
+    if not number:
+        return None
+    listed = ValidStaffID.objects.filter(staff_id__iexact=number).first()
+    if listed is None:
+        return None
+
+    account = (
+        User.objects.filter(role=User.Role.LECTURER, university_id__iexact=number, is_active=True)
+        .select_related("lecturer_profile__department__faculty")
+        .first()
+    )
+    lecturer = getattr(account, "lecturer_profile", None) if account else None
+    department = lecturer.department if lecturer else None
+
+    return {
+        "staff_number": listed.staff_id.strip().upper(),
+        "full_name": (account.get_full_name().strip() if account else "") or listed.name_hint.strip() or None,
+        "email": ((account.email or "").strip().lower() if account else "") or None,
+        "department": department.name if department else None,
+        "faculty": department.faculty.name if department and department.faculty_id else None,
+        "title": ((lecturer.rank or "").strip() or None) if lecturer else None,
+        "has_account": account is not None,
+        "is_active": True,
     }
