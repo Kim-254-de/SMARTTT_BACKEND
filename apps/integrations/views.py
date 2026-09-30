@@ -2,7 +2,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .permissions import HasAttendanceApiKey
-from .services import get_lecturer_units
+from .services import find_student, get_lecturer_units
 
 
 class AttendanceLecturerUnitsView(APIView):
@@ -57,3 +57,31 @@ class AttendanceLecturerUnitsView(APIView):
             "term": {"academic_year": term.academic_year, "semester": term.semester} if term else None,
             "units": result.units,
         })
+
+
+class AttendanceStudentLookupView(APIView):
+    """
+    GET /api/v1/integrations/attendance/students/?registration_number=EBT1/08223/23
+
+    For the Smart Attendance backend only (X-API-Key), when a student registers
+    there: confirms the registration number belongs to a SMARTTT student and
+    returns the details it checks the registration against. Registration
+    numbers contain "/", so they travel as a query parameter.
+
+    200 -> {"registration_number": "EBT1/08223/23", "full_name": "...",
+            "email": "..." | null, "programme": "..." | null,
+            "year_of_study": 3 | null, "is_active": true}
+    404 -> no student with this registration number.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [HasAttendanceApiKey]
+
+    def get(self, request):
+        number = (request.query_params.get("registration_number") or "").strip()
+        if not number:
+            return Response({"detail": "registration_number query param is required."}, status=400)
+        student = find_student(number)
+        if student is None:
+            return Response({"detail": "No student with this registration number."}, status=404)
+        return Response(student)
