@@ -32,6 +32,7 @@ from apps.timetable.permissions import CanManageTimetable, CanRescheduleTimetabl
 from apps.timetable.services.allocation_service import resolve_academic_year
 from apps.timetable.services.background_worker import dispatch_async_upload
 from apps.timetable.services.reschedule_notifications import notify_students_of_reschedule
+from apps.integrations.attendance_push import notify_attendance_of_reschedule
 from apps.timetable.validators import ExcelFileValidator
 from apps.timetable.utils import TimetableResponseFormatter
 
@@ -148,6 +149,10 @@ class TimetableSlotViewSet(ModelViewSet):
         slot.end_time = new_end
         slot.room = new_room
         slot.save(update_fields=["day_of_week", "start_time", "end_time", "room", "updated_at"])
+
+        # The attendance backend gates class activation on the slot's day/time and
+        # fences check-ins to its room, so it is told straight away.
+        notify_attendance_of_reschedule(slot)
 
         notify_result = notify_students_of_reschedule(
             slot,

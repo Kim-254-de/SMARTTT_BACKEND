@@ -137,6 +137,13 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 # Shared secret the Smart Attendance backend sends as X-API-Key to
 # /api/v1/integrations/attendance/. Unset = the integration endpoints refuse everything.
 ATTENDANCE_API_KEY = os.getenv("ATTENDANCE_API_KEY", "")
+# Where the Smart Attendance backend lives, e.g. https://attendance-api.example.com.
+# When set (with ATTENDANCE_API_KEY), a rescheduled class is pushed there at once
+# (apps/integrations/attendance_push.py). Unset = no push; it still catches up on its own.
+ATTENDANCE_BASE_URL = os.getenv("ATTENDANCE_BASE_URL", "")
+ATTENDANCE_TIMETABLE_CHANGES_PATH = os.getenv(
+    "ATTENDANCE_TIMETABLE_CHANGES_PATH", "/api/v1/integrations/smarttt/timetable-changes"
+)
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@nextup.co.ke")
 FRONTEND_RESET_PASSWORD_URL = os.getenv(
     "FRONTEND_RESET_PASSWORD_URL",
