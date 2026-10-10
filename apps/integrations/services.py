@@ -471,3 +471,52 @@ def find_staff(staff_number: str) -> dict | None:
         "has_account": account is not None,
         "is_active": True,
     }
+
+
+# ---------------------------------------------------------------------------
+# Sign-in, for Smart Attendance: one account, the SMARTTT one
+# ---------------------------------------------------------------------------
+
+
+def authenticate_account(identifier: str, password: str) -> dict | None:
+    """
+    Checks a SMARTTT login for the attendance system, which has no accounts
+    of its own for students and lecturers: they sign in there with their
+    SMARTTT email, admission number or staff ID and SMARTTT password.
+
+    The same lookup as accounts' LoginView (email, username or university_id,
+    case-insensitive), then Django's authenticate(), so a deactivated account
+    or a Google-only one (no usable password) is refused exactly as here.
+
+    None when the credentials are wrong. Otherwise the account, plus the
+    student or staff record the attendance system would otherwise have
+    fetched with the lookup endpoints: `student` for a student (None when
+    they have no admission number or student record yet), `staff` for a
+    lecturer (None when their staff ID is no longer on the approved list).
+    """
+    from django.contrib.auth import authenticate
+
+    login_id = (identifier or "").strip()
+    if not login_id or not password:
+        return None
+    user_obj = User.objects.filter(
+        Q(email__iexact=login_id) | Q(username__iexact=login_id) | Q(university_id__iexact=login_id)
+    ).first()
+    # Unknown ids still go through authenticate(), which runs the password
+    # hasher anyway, so timing doesn't reveal which accounts exist.
+    user = authenticate(username=user_obj.username if user_obj else login_id, password=password)
+    if user is None:
+        return None
+
+    number = (user.university_id or "").strip().upper() or None
+    return {
+        "account": {
+            "id": str(user.id),
+            "role": user.role,
+            "university_id": number,
+            "email": (user.email or "").strip().lower() or None,
+            "full_name": user.get_full_name().strip() or None,
+        },
+        "student": find_student(number) if user.role == User.Role.STUDENT and number else None,
+        "staff": find_staff(number) if user.role == User.Role.LECTURER and number else None,
+    }

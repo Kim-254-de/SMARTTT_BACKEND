@@ -2,7 +2,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .permissions import HasAttendanceApiKey
-from .services import find_staff, find_student, get_lecturer_units, get_student_units
+from .services import authenticate_account, find_staff, find_student, get_lecturer_units, get_student_units
 
 
 class AttendanceLecturerUnitsView(APIView):
@@ -156,3 +156,38 @@ class AttendanceStudentUnitsView(APIView):
             "term": {"academic_year": term.academic_year, "semester": term.semester} if term else None,
             "units": result.units,
         })
+
+
+class AttendanceAuthenticateView(APIView):
+    """
+    POST /api/v1/integrations/attendance/authenticate/
+    {"identifier": "EBT1/08223/23" | "STF/0001" | "name@uni.ac.ke", "password": "..."}
+
+    For the Smart Attendance backend only (X-API-Key): students and lecturers
+    sign in to attendance with their SMARTTT account, and attendance asks here
+    whether the password is right. POST, so the password never sits in a URL
+    or an access log.
+
+    Wrong credentials are a 200 with {"authenticated": false}, not a 401, so
+    the caller can never mistake them for its own key being refused (403).
+
+    200 -> {"authenticated": false}
+    200 -> {"authenticated": true,
+            "account": {"id", "role", "university_id", "email", "full_name"},
+            "student": <as GET attendance/students/> | null,
+            "staff": <as GET attendance/staff/> | null}
+    400 -> identifier or password missing.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [HasAttendanceApiKey]
+
+    def post(self, request):
+        identifier = str(request.data.get("identifier") or "").strip()
+        password = request.data.get("password")
+        if not identifier or not isinstance(password, str) or not password:
+            return Response({"detail": "identifier and password are required."}, status=400)
+        result = authenticate_account(identifier, password)
+        if result is None:
+            return Response({"authenticated": False})
+        return Response({"authenticated": True, **result})

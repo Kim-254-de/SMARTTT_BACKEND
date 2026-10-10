@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    AttendanceAuthenticateView,
     AttendanceLecturerUnitsView,
     AttendanceStaffLookupView,
     AttendanceStudentLookupView,
@@ -8,6 +9,11 @@ from .views import (
 )
 
 urlpatterns = [
+    path(
+        "attendance/authenticate/",
+        AttendanceAuthenticateView.as_view(),
+        name="integrations-attendance-authenticate",
+    ),
     path(
         "attendance/lecturer-units/",
         AttendanceLecturerUnitsView.as_view(),
