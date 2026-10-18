@@ -164,3 +164,16 @@ def apply_plan(academic_year: str, plan: dict, directory: LecturerDirectory) -> 
             changed_slots, ["lecturer", "lecturer_name_text", "allocation_document"], batch_size=500
         )
     return {"updated": len(changed_slots), "cleared": len(stale_ids), "overridden": overridden}
+
+
+def reapply_allocations(academic_year: str) -> dict | None:
+    """
+    Re-resolves lecturers from the year's stored documents. Called after a master
+    timetable upload: its slots are created without lecturers, so allocations
+    uploaded earlier would otherwise never reach them. None when nothing is stored.
+    """
+    documents = list(AllocationDocument.objects.filter(academic_year=academic_year))
+    if not documents:
+        return None
+    plan, _refs = plan_for_year(academic_year, documents)
+    return apply_plan(academic_year, plan, LecturerDirectory())

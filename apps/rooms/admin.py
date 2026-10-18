@@ -15,11 +15,12 @@ class RoomAdmin(admin.ModelAdmin):
         "building",
         "floor",
         "capacity",
+        "capacity_confirmed",
         "room_type_display",
         "status_badge",
         "sessions_count",
     )
-    list_filter = ("building", "room_type", "status", "capacity", "created_at")
+    list_filter = ("building", "room_type", "status", "capacity_confirmed", "created_at")
     search_fields = ("code", "name", "building")
     readonly_fields = ("id", "sessions_count_readonly", "created_at", "updated_at")
     ordering = ("building", "floor", "code")
@@ -28,7 +29,7 @@ class RoomAdmin(admin.ModelAdmin):
         (
             _("Room Information"),
             {
-                "fields": ("id", "code", "name", "building", "floor", "capacity", "room_type")
+                "fields": ("id", "code", "name", "building", "floor", "capacity", "capacity_confirmed", "room_type")
             },
         ),
         (
@@ -52,6 +53,11 @@ class RoomAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+    def save_model(self, request, obj, form, change):
+        if "capacity" in form.changed_data:
+            obj.capacity_confirmed = True
+        super().save_model(request, obj, form, change)
 
     def room_type_display(self, obj):
         return obj.get_room_type_display()

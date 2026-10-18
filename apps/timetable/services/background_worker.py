@@ -2,11 +2,24 @@ import os
 import threading
 import logging
 from django.db import connection
+from apps.common.services.cache_service import PersonalizationCacheService
 from apps.timetable.models import TimetableUploadBatch
+from apps.timetable.services.allocation_service import reapply_allocations
 from apps.timetable.services.pdf_timetable_parser import parse_pdf, to_timetable_slot_dicts
 from apps.timetable.services.persistence import TimetablePersistenceService
 
 logger = logging.getLogger(__name__)
+
+
+def _reapply_allocations(batch_id: str, academic_year: str) -> None:
+    """The timetable itself is saved either way; a failure here only leaves lecturers unset."""
+    try:
+        applied = reapply_allocations(academic_year)
+        if applied is not None:
+            logger.info(f"[Batch {batch_id}] Re-applied lecturer allocations: {applied['updated']} slot(s) updated.")
+        PersonalizationCacheService.clear_all()
+    except Exception as exc:
+        logger.exception(f"[Batch {batch_id}] Could not re-apply lecturer allocations: {exc}")
 
 def _process_timetable_async(batch_id: str, file_path: str, academic_year: str = "2026/2027"):
     """
@@ -42,6 +55,9 @@ def _process_timetable_async(batch_id: str, file_path: str, academic_year: str =
         batch.status = "processed" if not errors else "partial"
         batch.save(update_fields=["rows_saved", "rows_failed", "status"])
         logger.info(f"[Batch {batch_id}] Finished: {len(saved_slots)} saved, {len(errors)} failed.")
+
+        # 5. Put the year's already-uploaded lecturer allocations onto the new slots
+        _reapply_allocations(batch_id, academic_year)
 
     except Exception as exc:
         logger.exception(f"[Batch {batch_id}] Extraction crashed: {exc}")

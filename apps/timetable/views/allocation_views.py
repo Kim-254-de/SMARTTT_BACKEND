@@ -183,11 +183,9 @@ class AssignLecturersAPIView(APIView):
                 {"detail": "No academic term exists yet; upload the master timetable first."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if not year_slots(academic_year).exists():
-            return Response(
-                {"detail": f"The master timetable for {academic_year} has no slots to allocate lecturers to."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # Allocations may arrive before the timetable: they are stored and applied
+        # when the timetable upload finishes (background_worker).
+        awaiting_timetable = not year_slots(academic_year).exists()
 
         try:
             rows, department = _parse_upload(file_obj)
@@ -252,7 +250,13 @@ class AssignLecturersAPIView(APIView):
             "detail": (
                 f"{'Previewed' if dry_run else 'Saved'} {len(rows)} allocation row(s) from {source}"
                 f"{' (replacing its previous upload)' if replaced else ''}."
+                + (
+                    f" The {academic_year} timetable has not been uploaded yet; these lecturers"
+                    " will be applied automatically once it is."
+                    if awaiting_timetable else ""
+                )
             ),
+            "awaiting_timetable": awaiting_timetable,
             "academic_year": academic_year,
             "source": source,
             "dry_run": dry_run,

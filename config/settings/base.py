@@ -18,6 +18,13 @@ ALLOWED_HOSTS = [
     for h in os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")
     if h.strip()
 ]
+# Railway exposes the service's generated domain; allow it automatically
+RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+if RAILWAY_PUBLIC_DOMAIN:
+    ALLOWED_HOSTS.append(RAILWAY_PUBLIC_DOMAIN)
+# Railway's deploy healthcheck probes from this host
+if os.getenv("RAILWAY_ENVIRONMENT"):
+    ALLOWED_HOSTS.append("healthcheck.railway.app")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -44,6 +51,7 @@ INSTALLED_APPS = [
     "apps.timetable",
     "apps.units",
     "apps.courses",
+    "apps.integrations",
 ]
 
 MIDDLEWARE = [
@@ -108,7 +116,10 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
@@ -122,6 +133,17 @@ EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "True") == "True"
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+
+# Shared secret the Smart Attendance backend sends as X-API-Key to
+# /api/v1/integrations/attendance/. Unset = the integration endpoints refuse everything.
+ATTENDANCE_API_KEY = os.getenv("ATTENDANCE_API_KEY", "")
+# Where the Smart Attendance backend lives, e.g. https://attendance-api.example.com.
+# When set (with ATTENDANCE_API_KEY), a rescheduled class is pushed there at once
+# (apps/integrations/attendance_push.py). Unset = no push; it still catches up on its own.
+ATTENDANCE_BASE_URL = os.getenv("ATTENDANCE_BASE_URL", "")
+ATTENDANCE_TIMETABLE_CHANGES_PATH = os.getenv(
+    "ATTENDANCE_TIMETABLE_CHANGES_PATH", "/api/v1/integrations/smarttt/timetable-changes"
+)
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@nextup.co.ke")
 FRONTEND_RESET_PASSWORD_URL = os.getenv(
     "FRONTEND_RESET_PASSWORD_URL",
@@ -176,6 +198,8 @@ CORS_ALLOW_HEADERS = [
     "x-csrftoken",
 ]
 CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS")
+if RAILWAY_PUBLIC_DOMAIN:
+    CSRF_TRUSTED_ORIGINS.append(f"https://{RAILWAY_PUBLIC_DOMAIN}")
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 PORTAL_URL = os.getenv("PORTAL_URL", "https://students.tharaka.ac.ke/")

@@ -10,13 +10,17 @@ if [ -n "$POSTGRES_HOST" ]; then
     echo "PostgreSQL is ready."
 fi
 
-# Apply database migrations
-echo "Applying database migrations..."
-python manage.py migrate --noinput
+# Set SKIP_SETUP=1 for one-off/cron services that share this image
+if [ "$SKIP_SETUP" != "1" ]; then
+    # Apply database migrations
+    echo "Applying database migrations..."
+    python manage.py migrate --noinput
 
-# Collect static files
-echo "Collecting static files..."
-python manage.py collectstatic --noinput
+    # Static files are collected at build time (see Dockerfile)
+
+    # Create the admin superuser if DJANGO_SUPERUSER_EMAIL/PASSWORD are set
+    python manage.py create_admin
+fi
 
 echo "Starting application with command: $@"
 exec "$@"

@@ -1,0 +1,193 @@
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from .permissions import HasAttendanceApiKey
+from .services import authenticate_account, find_staff, find_student, get_lecturer_units, get_student_units
+
+
+class AttendanceLecturerUnitsView(APIView):
+    """
+    GET /api/v1/integrations/attendance/lecturer-units/?staff_number=STF/0001&name=Peter%20Kamami
+
+    For the Smart Attendance backend only (X-API-Key). Reports one entry per
+    class the lecturer teaches: a unit split into groups (GR A, GR B ...)
+    appears once per group they are allocated, with only that group's students.
+    Staff numbers contain "/", so they travel as a query parameter rather than
+    a path segment.
+
+    `name` is optional: used to match allocation-document slots when the staff
+    number has no SMARTTT account yet. When the account exists, its own name
+    is used instead.
+
+    200 -> {
+        "staff_number": "STF/0001",
+        "lecturer_account": true,
+        "term": {"academic_year": "2025/2026", "semester": 1} | null,
+        "units": [{                       # one per class: unit + teaching group
+            "code": "COSC 103 GR A",      # the class; plain "COSC 103" when not split
+            "unit_code": "COSC 103", "group": "GR A" | null,
+            "name": "...", "registered_students": 150,
+            "students_without_group": 40, # registered for the unit, no group picked yet
+            "matched_by": "account" | "name",
+            "students": [{"registration_number": "EBT1/08223/23", "full_name": "..."}],
+            "slots": [{"day_of_week": 1, "start_time": "08:00", "end_time": "10:00",
+                       "room": "LH1", "class_group": "MAIN", "program": "..."}]
+        }]
+    }
+    404 -> the lecturer can't be identified (no account and no name given).
+    """
+
+    authentication_classes: list = []
+    permission_classes = [HasAttendanceApiKey]
+
+    def get(self, request):
+        staff_number = (request.query_params.get("staff_number") or "").strip()
+        if not staff_number:
+            return Response({"detail": "staff_number query param is required."}, status=400)
+        name = (request.query_params.get("name") or "").strip()
+
+        result = get_lecturer_units(staff_number, fallback_name=name)
+        if result is None:
+            return Response({"detail": "No lecturer with this staff number."}, status=404)
+
+        term = result.term
+        return Response({
+            "staff_number": staff_number,
+            "lecturer_account": result.account is not None,
+            "term": {"academic_year": term.academic_year, "semester": term.semester} if term else None,
+            "units": result.units,
+        })
+
+
+class AttendanceStudentLookupView(APIView):
+    """
+    GET /api/v1/integrations/attendance/students/?registration_number=EBT1/08223/23
+
+    For the Smart Attendance backend only (X-API-Key), when a student registers
+    there: confirms the registration number belongs to a SMARTTT student and
+    returns the details it checks the registration against. Registration
+    numbers contain "/", so they travel as a query parameter.
+
+    200 -> {"registration_number": "EBT1/08223/23", "full_name": "...",
+            "email": "..." | null, "programme": "..." | null,
+            "year_of_study": 3 | null, "is_active": true}
+    404 -> no student with this registration number.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [HasAttendanceApiKey]
+
+    def get(self, request):
+        number = (request.query_params.get("registration_number") or "").strip()
+        if not number:
+            return Response({"detail": "registration_number query param is required."}, status=400)
+        student = find_student(number)
+        if student is None:
+            return Response({"detail": "No student with this registration number."}, status=404)
+        return Response(student)
+
+
+class AttendanceStaffLookupView(APIView):
+    """
+    GET /api/v1/integrations/attendance/staff/?staff_number=STF/0001
+
+    For the Smart Attendance backend only (X-API-Key), when a lecturer
+    registers there: confirms the staff number is on SMARTTT's approved staff
+    list (the admin's staff-ID uploads). Staff numbers contain "/", so they
+    travel as a query parameter.
+
+    200 -> {"staff_number": "STF/0001", "full_name": "..." | null,
+            "email": "..." | null, "department": "..." | null,
+            "faculty": "..." | null, "title": "..." | null,
+            "has_account": true, "is_active": true}
+    404 -> the staff number is not on the approved staff list.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [HasAttendanceApiKey]
+
+    def get(self, request):
+        number = (request.query_params.get("staff_number") or "").strip()
+        if not number:
+            return Response({"detail": "staff_number query param is required."}, status=400)
+        staff = find_staff(number)
+        if staff is None:
+            return Response({"detail": "No staff member with this staff number."}, status=404)
+        return Response(staff)
+
+
+class AttendanceStudentUnitsView(APIView):
+    """
+    GET /api/v1/integrations/attendance/student-units/?registration_number=EBT1/08223/23
+
+    For the Smart Attendance backend only (X-API-Key): the classes a student
+    is registered for this term, keyed by the same section code the
+    lecturer-units roster uses, so the attendance system can show a student
+    their units before (or without) their lecturer syncing them.
+
+    200 -> {
+        "registration_number": "EBT1/08223/23",
+        "term": {"academic_year": "2025/2026", "semester": 1} | null,
+        "units": [{
+            "code": "COSC 103 GR A", "unit_code": "COSC 103", "group": "GR A" | null,
+            "name": "...",
+            "group_required": false,      # split unit, no group picked yet
+            "lecturers": ["Peter Kamami"],
+            "slots": [{"day_of_week": 1, "start_time": "08:00", "end_time": "10:00",
+                       "room": "LH1", "class_group": "GR A", "program": "..."}]
+        }]
+    }
+    404 -> no student with this registration number.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [HasAttendanceApiKey]
+
+    def get(self, request):
+        number = (request.query_params.get("registration_number") or "").strip()
+        if not number:
+            return Response({"detail": "registration_number query param is required."}, status=400)
+        result = get_student_units(number)
+        if result is None:
+            return Response({"detail": "No student with this registration number."}, status=404)
+        term = result.term
+        return Response({
+            "registration_number": result.registration_number,
+            "term": {"academic_year": term.academic_year, "semester": term.semester} if term else None,
+            "units": result.units,
+        })
+
+
+class AttendanceAuthenticateView(APIView):
+    """
+    POST /api/v1/integrations/attendance/authenticate/
+    {"identifier": "EBT1/08223/23" | "STF/0001" | "name@uni.ac.ke", "password": "..."}
+
+    For the Smart Attendance backend only (X-API-Key): students and lecturers
+    sign in to attendance with their SMARTTT account, and attendance asks here
+    whether the password is right. POST, so the password never sits in a URL
+    or an access log.
+
+    Wrong credentials are a 200 with {"authenticated": false}, not a 401, so
+    the caller can never mistake them for its own key being refused (403).
+
+    200 -> {"authenticated": false}
+    200 -> {"authenticated": true,
+            "account": {"id", "role", "university_id", "email", "full_name"},
+            "student": <as GET attendance/students/> | null,
+            "staff": <as GET attendance/staff/> | null}
+    400 -> identifier or password missing.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [HasAttendanceApiKey]
+
+    def post(self, request):
+        identifier = str(request.data.get("identifier") or "").strip()
+        password = request.data.get("password")
+        if not identifier or not isinstance(password, str) or not password:
+            return Response({"detail": "identifier and password are required."}, status=400)
+        result = authenticate_account(identifier, password)
+        if result is None:
+            return Response({"authenticated": False})
+        return Response({"authenticated": True, **result})

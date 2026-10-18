@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from django.conf import settings
+from django.db import transaction
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -28,8 +29,10 @@ from apps.timetable.serializers import (
     TimetableUploadBatchDetailedSerializer,
 )
 from apps.timetable.permissions import CanManageTimetable, CanRescheduleTimetableSlot
+from apps.timetable.services.allocation_service import resolve_academic_year
 from apps.timetable.services.background_worker import dispatch_async_upload
 from apps.timetable.services.reschedule_notifications import notify_students_of_reschedule
+from apps.integrations.attendance_push import notify_attendance_of_reschedule
 from apps.timetable.validators import ExcelFileValidator
 from apps.timetable.utils import TimetableResponseFormatter
 
@@ -49,6 +52,18 @@ class AcademicTermViewSet(ModelViewSet):
     ordering_fields = ["-academic_year", "-semester", "is_current"]
     ordering = ["-academic_year", "-semester"]
     pagination_class = StandardResultsSetPagination
+
+    @action(detail=True, methods=["post"], url_path="set-current")
+    def set_current(self, request, pk=None):
+        term = self.get_object()
+        with transaction.atomic():
+            AcademicTerm.objects.filter(is_current=True).exclude(pk=term.pk).update(is_current=False)
+            term.is_current = True
+            term.save(update_fields=["is_current"])
+        return Response(
+            {"detail": f"{term} is now the current term."},
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["delete"], url_path="clear-slots")
     def clear_slots(self, request, pk=None):
@@ -134,6 +149,10 @@ class TimetableSlotViewSet(ModelViewSet):
         slot.end_time = new_end
         slot.room = new_room
         slot.save(update_fields=["day_of_week", "start_time", "end_time", "room", "updated_at"])
+
+        # The attendance backend gates class activation on the slot's day/time and
+        # fences check-ins to its room, so it is told straight away.
+        notify_attendance_of_reschedule(slot)
 
         notify_result = notify_students_of_reschedule(
             slot,
@@ -255,7 +274,8 @@ class TimetableUploadAPIView(APIView):
             )
 
         upload_batch = serializer.save(status="processing")
-        academic_year = request.data.get("academic_year", "2026/2027")
+        # Same default as the allocation upload, so lecturers land on these slots.
+        academic_year = request.data.get("academic_year") or resolve_academic_year() or "2026/2027"
 
         # Spawn daemon worker thread
         dispatch_async_upload(upload_batch, saved_file_path, academic_year=academic_year)

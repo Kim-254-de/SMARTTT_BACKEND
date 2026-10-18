@@ -25,6 +25,12 @@ services:
         value: smart-timetable-8f116
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
+      # Shared with the Smart Attendance backend (its SMARTTT_API_KEY). Set in the dashboard.
+      - key: ATTENDANCE_API_KEY
+        sync: false
+      # The Smart Attendance backend's URL, so rescheduled classes reach it at once. Set in the dashboard.
+      - key: ATTENDANCE_BASE_URL
+        sync: false
 
   - type: cron
     name: smarttt-class-reminders
