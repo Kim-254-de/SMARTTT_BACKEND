@@ -217,3 +217,57 @@ class ChangePayloadTests(APITestCase):
             {"staff_number": None, "unit_codes": ["COSC 103 GR B"]},
             {"staff_number": "STF/0001", "unit_codes": ["COSC 103 GR A", "COSC 200"]},
         ])
+
+
+@override_settings(GENERATOR_API_KEY=KEY, ATTENDANCE_API_KEY="attendance-key", ALLOCATOR_API_KEY="allocator-key")
+class PublishToAttendanceTests(APITestCase):
+    """A published, allocated class is what Smart Attendance lets the lecturer activate."""
+
+    def setUp(self):
+        faculty = Faculty.objects.create(name="Science", code="FSC")
+        cs = Department.objects.create(faculty=faculty, name="Computer Science", code="CS")
+        self.room = Room.objects.create(code="STB 1", name="STB 1", building="STB", capacity=150)
+        self.room2 = Room.objects.create(code="STB 2", name="STB 2", building="STB", capacity=150)
+        self.term = AcademicTerm.objects.create(
+            academic_year="2026/2027", semester=1, start_date=date(2026, 9, 21),
+            end_date=date(2026, 12, 18), is_current=True,
+        )
+        self.program = Program.objects.create(department=cs, name="BSc CS", code="BSC.COMP SCI")
+        self.unit = Unit.objects.create(code="COSC 103", name="Intro", credit_hours=3, department=cs)
+        user = User.objects.create_user(username="jane", password="x", role=User.Role.LECTURER,
+                                        university_id="STF/0001", first_name="Jane", last_name="Otieno")
+        self.jane = Lecturer.objects.create(user=user, department=cs)
+
+    def _publish(self, version, based_on, day, room):
+        body = {"term_id": str(self.term.id), "version": version, "based_on_version": based_on,
+                "published_by": "director", "sessions": [{
+                    "key": "COSC103-GRA-1", "unit_id": self.unit.id, "group_label": "GR A",
+                    "class_rows": [{"program_id": self.program.id, "year_of_study": 1, "study_semester": 1,
+                                    "stream": ""}],
+                    "room_id": str(room.id), "day_of_week": day, "start_time": "10:00", "end_time": "12:00"}]}
+        return self.client.post(PUBLISH, body, format="json", HTTP_X_API_KEY=KEY)
+
+    @mock.patch("apps.integrations.timetabling_views.notify_attendance_of_changes")
+    def test_published_class_reaches_the_lecturers_attendance_units(self, push):
+        self.assertEqual(self._publish(1, None, "TUE", self.room).status_code, 201)
+
+        from apps.integrations.allocator import section_key, set_section_lecturer
+
+        set_section_lecturer(self.term, section_key(self.unit.id, "GR A"), str(self.jane.id))
+        units = self.client.get(
+            reverse("integrations-attendance-lecturer-units"), {"staff_number": "STF/0001"},
+            HTTP_X_API_KEY="attendance-key",
+        ).json()["units"]
+        self.assertEqual(units[0]["code"], "COSC 103 GR A")
+        # SMARTTT stores TUE; attendance counts days 0=Sunday, so Tuesday is 2.
+        self.assertEqual(units[0]["slots"], [{"day_of_week": 2, "start_time": "10:00", "end_time": "12:00",
+                                              "room": "STB 1", "class_group": "GR A", "program": "BSc CS"}])
+
+        # A mid-term room move is pushed to attendance for Jane's class.
+        push.reset_mock()
+        response = self._publish(2, 1, "TUE", self.room2)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["changes"]["moved"], ["COSC103-GRA-1"])
+        self.assertIn(("STF/0001", "COSC 103 GR A"), push.call_args.args[0])
+        slot = TimetableSlot.objects.get(session_key="COSC103-GRA-1")
+        self.assertEqual((slot.room_id, slot.lecturer_id), (self.room2.id, self.jane.id))
