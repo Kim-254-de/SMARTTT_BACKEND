@@ -84,3 +84,47 @@ def notify_attendance_of_reschedule(slot) -> bool:
 
     transaction.on_commit(start)
     return True
+
+
+def change_payloads(changes: list[tuple[str | None, str]]) -> list[dict]:
+    """
+    (staff number or None, section code) pairs -> one payload per lecturer,
+    with every class of theirs that changed. Classes with no lecturer go out
+    together under staff_number None, so the attendance backend re-syncs
+    whoever holds them there.
+    """
+    by_staff: dict[str | None, list[str]] = {}
+    for staff_number, code in changes:
+        number = (staff_number or "").strip().upper() or None
+        codes = by_staff.setdefault(number, [])
+        if code and code not in codes:
+            codes.append(code)
+    return [
+        {"staff_number": number, "unit_codes": sorted(codes)}
+        for number, codes in sorted(by_staff.items(), key=lambda item: item[0] or "")
+        if number or codes
+    ]
+
+
+def notify_attendance_of_changes(changes: list[tuple[str | None, str]]) -> int:
+    """
+    Pushes a batch of changed classes - a lecturer allocated or replaced, a
+    timetable version published - after the transaction commits, one POST per
+    lecturer, on one background thread. Returns how many pushes were queued
+    (0 when the integration is off or nothing changed).
+    """
+    if not _enabled():
+        return 0
+    payloads = change_payloads(changes)
+    if not payloads:
+        return 0
+
+    def send_all():
+        for payload in payloads:
+            send_timetable_change(payload)
+
+    def start():
+        threading.Thread(target=send_all, daemon=True).start()
+
+    transaction.on_commit(start)
+    return len(payloads)

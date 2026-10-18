@@ -121,6 +121,32 @@ class TimetableSlot(BaseModel):
         blank=True,
         related_name="slots",
     )
+    session_key = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Stable id of the Timetable Generator session this slot was "
+                  "published from, e.g. 'COSC103-GRA-1'. One session serving "
+                  "several class rows is one slot per row, all with this key. "
+                  "Republishing updates slots by key instead of replacing them. "
+                  "Blank for slots that came from an upload.",
+    )
+    study_semester = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text="The class row's own semester of study, the 'S1' in "
+                  "'BSC.NURSING Y2S1', when the Generator published it. Kept "
+                  "apart from term.semester, the calendar term (1-3).",
+    )
+    publication = models.ForeignKey(
+        "timetable.TimetablePublication",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="slots",
+        help_text="The published version that last wrote this slot.",
+    )
 
     class Meta:
         ordering = ["term", "day_of_week", "start_time"]

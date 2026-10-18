@@ -144,6 +144,15 @@ ATTENDANCE_BASE_URL = os.getenv("ATTENDANCE_BASE_URL", "")
 ATTENDANCE_TIMETABLE_CHANGES_PATH = os.getenv(
     "ATTENDANCE_TIMETABLE_CHANGES_PATH", "/api/v1/integrations/smarttt/timetable-changes"
 )
+# Shared secrets the two timetabling systems send as X-API-Key: the Timetable
+# Allocator to /api/v1/integrations/allocator/, the Timetable Generator to
+# /api/v1/integrations/generator/. One key per system, so each only opens its
+# own endpoints. Unset = that system's endpoints refuse everything.
+ALLOCATOR_API_KEY = os.getenv("ALLOCATOR_API_KEY", "")
+GENERATOR_API_KEY = os.getenv("GENERATOR_API_KEY", "")
+# Django auth group whose members are the Directorate of Examinations and
+# Timetabling: they run the Generator and see every department's allocation progress.
+TIMETABLING_OFFICE_GROUP = os.getenv("TIMETABLING_OFFICE_GROUP", "timetabling_office")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "noreply@nextup.co.ke")
 FRONTEND_RESET_PASSWORD_URL = os.getenv(
     "FRONTEND_RESET_PASSWORD_URL",
