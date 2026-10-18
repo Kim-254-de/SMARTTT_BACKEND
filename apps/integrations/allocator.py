@@ -148,6 +148,7 @@ def build_sections(slots) -> list[dict]:
                 "program_id": slot.program_id,
                 "program_code": slot.program.code if slot.program else None,
                 "program_name": slot.program.name if slot.program else None,
+                "program_department_id": slot.program.department_id if slot.program else None,
                 "year_of_study": slot.year_of_study,
                 "study_semester": slot.study_semester,
                 "stream": slot.stream or "",

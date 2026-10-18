@@ -167,7 +167,7 @@ class AllocatorSectionsView(_TimetablingView):
     200 -> {"term": {...}, "department_id": 7, "sections": [{
               "key": "412-GRA", "code": "COSC 103 GR A", "group": "GR A" | null,
               "unit": {"id", "code", "name", "credit_hours", "department_id"},
-              "class_rows": [{"program_id", "program_code", "program_name",
+              "class_rows": [{"program_id", "program_code", "program_name", "program_department_id",
                               "year_of_study", "study_semester", "stream"}],
               "meetings": [{"day_of_week": "TUE", "start_time": "10:00", "end_time": "12:00",
                             "room": {"id", "code", "capacity"}, "session_key"}],
