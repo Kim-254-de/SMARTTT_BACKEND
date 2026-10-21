@@ -137,6 +137,10 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 # Shared secret the Smart Attendance backend sends as X-API-Key to
 # /api/v1/integrations/attendance/. Unset = the integration endpoints refuse everything.
 ATTENDANCE_API_KEY = os.getenv("ATTENDANCE_API_KEY", "")
+# The Timetable Generator publishes each approved timetable here as the term's
+# master timetable (apps/integrations/generator_publish.py), with this key in
+# X-API-Key. Must equal SMARTTT_API_KEY in the Generator. Unset = refused.
+GENERATOR_API_KEY = os.getenv("GENERATOR_API_KEY", "")
 # Where the Smart Attendance backend lives, e.g. https://attendance-api.example.com.
 # When set (with ATTENDANCE_API_KEY), a rescheduled class is pushed there at once
 # (apps/integrations/attendance_push.py). Unset = no push; it still catches up on its own.

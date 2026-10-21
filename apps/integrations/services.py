@@ -478,6 +478,21 @@ def find_staff(staff_number: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
+def is_console_admin(user: User) -> bool:
+    """
+    Whether this account administers the platform from the unified admin
+    console (the Smart Attendance admin portal): an active staff account
+    (is_staff, as SMARTTT's own admin pages require) that is not a student's
+    or lecturer's. One account has one role there, and a teaching account
+    keeps the lecturer portal.
+    """
+    return bool(
+        user.is_active
+        and user.is_staff
+        and user.role not in (User.Role.STUDENT, User.Role.LECTURER)
+    )
+
+
 def authenticate_account(identifier: str, password: str) -> dict | None:
     """
     Checks a SMARTTT login for the attendance system, which has no accounts
@@ -516,6 +531,7 @@ def authenticate_account(identifier: str, password: str) -> dict | None:
             "university_id": number,
             "email": (user.email or "").strip().lower() or None,
             "full_name": user.get_full_name().strip() or None,
+            "is_admin": is_console_admin(user),
         },
         "student": find_student(number) if user.role == User.Role.STUDENT and number else None,
         "staff": find_staff(number) if user.role == User.Role.LECTURER and number else None,

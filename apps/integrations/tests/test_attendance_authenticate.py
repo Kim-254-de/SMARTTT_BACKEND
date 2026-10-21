@@ -60,6 +60,7 @@ class AttendanceAuthenticateTests(APITestCase):
             self.assertEqual(res.data["account"], {
                 "id": str(user.id), "role": "student", "university_id": "EBT1/08223/23",
                 "email": "amina@students.tharaka.ac.ke", "full_name": "Amina Kamau",
+                "is_admin": False,
             })
             self.assertEqual(res.data["student"], {
                 "registration_number": "EBT1/08223/23", "full_name": "Amina Kamau",
@@ -105,3 +106,23 @@ class AttendanceAuthenticateTests(APITestCase):
         self.assertEqual(res.data["authenticated"], True)
         self.assertIsNone(res.data["account"]["university_id"])
         self.assertIsNone(res.data["student"])
+
+    def test_a_staff_account_is_an_administrator(self):
+        User.objects.create_user(username="registry@tharaka.ac.ke", email="registry@tharaka.ac.ke", password=PASSWORD,
+                                 role=User.Role.ADMIN, is_staff=True, first_name="Grace", last_name="Mwangi")
+        res = self._post("REGISTRY@tharaka.ac.ke")
+        self.assertEqual(res.data["authenticated"], True)
+        self.assertIs(res.data["account"]["is_admin"], True)
+        self.assertIsNone(res.data["student"])
+        self.assertIsNone(res.data["staff"])
+
+    def test_a_lecturer_with_staff_rights_stays_a_lecturer(self):
+        user = self._lecturer()
+        user.is_staff = True
+        user.save(update_fields=["is_staff"])
+        self.assertIs(self._post("STF/0001").data["account"]["is_admin"], False)
+
+    def test_an_admin_role_without_staff_rights_is_not_an_administrator(self):
+        User.objects.create_user(username="clerk@tharaka.ac.ke", email="clerk@tharaka.ac.ke", password=PASSWORD,
+                                 role=User.Role.ADMIN, is_staff=False)
+        self.assertIs(self._post("clerk@tharaka.ac.ke").data["account"]["is_admin"], False)

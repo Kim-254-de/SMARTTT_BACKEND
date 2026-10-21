@@ -20,3 +20,16 @@ class HasAttendanceApiKey(BasePermission):
         if not expected or not provided:
             return False
         return hmac.compare_digest(provided.encode(), expected.encode())
+
+
+class HasGeneratorApiKey(BasePermission):
+    """The Timetable Generator, with its own shared key (GENERATOR_API_KEY). Fails closed when unset."""
+
+    message = "A valid X-API-Key header is required."
+
+    def has_permission(self, request, view) -> bool:
+        expected = getattr(settings, "GENERATOR_API_KEY", "") or ""
+        provided = request.headers.get("X-API-Key", "") or ""
+        if not expected or not provided:
+            return False
+        return hmac.compare_digest(provided.encode(), expected.encode())

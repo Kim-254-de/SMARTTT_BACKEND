@@ -74,8 +74,10 @@ class CanManageTimetable(BasePermission):
             return True
 
         if is_department_admin(request.user):
+            # Terms and other records with no department belong to no department admin.
+            obj_dept_id = getattr(obj, "department_id", None)
             user_dept_id = getattr(request.user, "department_id", None)
-            return obj.department_id == user_dept_id
+            return obj_dept_id is not None and obj_dept_id == user_dept_id
 
         return False
 
