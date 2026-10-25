@@ -136,11 +136,18 @@ def exam_sessions_payload(publication) -> dict:
     split) and its invigilator (main or extra). The attendance backend replaces
     the term's exam sessions with these.
     """
-    from apps.timetable.services.exam_service import reg_ranges
+    from apps.timetable.services.exam_service import reg_ranges, seat_for, students_of_paper
 
     sessions = []
     for paper in publication.papers.prefetch_related("seatings__room"):
         ranges = reg_ranges(paper)
+        # Who sits in which room, as SMARTTT decides it: attendance lets a student
+        # check in only where their registration number is listed.
+        seated: dict[str, list[str]] = {}
+        for student in students_of_paper(paper):
+            seat = seat_for(student, paper)
+            if seat is not None:
+                seated.setdefault(seat.room.code, []).append(student.registration_number.upper())
         by_room: dict[str, list] = {}
         for seat in paper.seatings.all():
             by_room.setdefault(seat.room.code, []).append(seat)
@@ -165,6 +172,7 @@ def exam_sessions_payload(publication) -> dict:
                         }
                         for s in seats
                     ],
+                    "registration_numbers": sorted(seated.get(room, [])),
                     "invigilator_staff_number": seats[0].invigilator_staff_number,
                     "role": seats[0].role,
                     "main_invigilator_staff_number": main,

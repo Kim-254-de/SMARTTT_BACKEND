@@ -345,3 +345,5 @@ class AttendancePushTests(ExamCase):
         self.assertEqual(sessions[0]["candidates"][0]["reg_from"], "CS/0001/26")
         self.assertEqual(sessions[1]["candidates"][0]["reg_to"], "CS/0004/26")
         self.assertEqual(sessions[1]["main_invigilator_staff_number"], "STF/0001")
+        self.assertEqual(sessions[0]["registration_numbers"], ["CS/0001/26", "CS/0002/26"])
+        self.assertEqual(sessions[1]["registration_numbers"], ["CS/0003/26", "CS/0004/26"])
