@@ -5,7 +5,7 @@ from django.urls import reverse
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import User, ValidStaffID
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
 from apps.timetable.models import AcademicTerm
 
 KEY = "test-attendance-key"
@@ -88,48 +88,41 @@ class ActingAdminTests(APITestCase):
 
 @override_settings(ATTENDANCE_API_KEY=KEY)
 class DirectoryTests(APITestCase):
-    """attendance/faculties/ and attendance/departments/: SMARTTT owns them, attendance links to them."""
+    """attendance/departments/: SMARTTT owns them, attendance links to them. No faculties."""
 
-    FACULTIES = reverse("integrations-attendance-faculties")
     DEPARTMENTS = reverse("integrations-attendance-departments")
 
     def _post(self, url, body, key=KEY):
         return self.client.post(url, body, format="json", **({"HTTP_X_API_KEY": key} if key else {}))
 
     def test_requires_the_api_key(self):
-        self.assertEqual(self.client.get(self.FACULTIES).status_code, 403)
-        self.assertEqual(self._post(self.FACULTIES, {"name": "Science"}, key="wrong").status_code, 403)
+        self.assertEqual(self.client.get(self.DEPARTMENTS).status_code, 403)
+        self.assertEqual(self._post(self.DEPARTMENTS, {"name": "Physics"}, key="wrong").status_code, 403)
 
-    def test_a_faculty_is_created_with_a_code_from_its_name(self):
-        Faculty.objects.create(name="Faculty of Education", code="FS")
-        res = self._post(self.FACULTIES, {"name": "  Faculty of   Science "})
-        self.assertEqual(res.status_code, 201)
-        self.assertEqual(res.data["name"], "Faculty of Science")
-        self.assertEqual(res.data["code"], "FS2")
+    def test_the_faculties_endpoint_is_gone(self):
+        self.assertEqual(self.client.get("/api/v1/integrations/attendance/faculties/", HTTP_X_API_KEY=KEY).status_code, 404)
 
-        listed = self.client.get(self.FACULTIES, HTTP_X_API_KEY=KEY).data["faculties"]
-        self.assertEqual([f["name"] for f in listed], ["Faculty of Education", "Faculty of Science"])
+    def test_a_department_is_created_with_the_code_given(self):
+        res = self._post(self.DEPARTMENTS, {"name": "  Computer   Science ", "code": "dcomp"})
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual((res.data["name"], res.data["code"]), ("Computer Science", "DCOMP"))
+        self.assertNotIn("faculty_id", res.data)
+        listed = self.client.get(self.DEPARTMENTS, HTTP_X_API_KEY=KEY).data["departments"]
+        self.assertEqual(listed, [{"id": res.data["id"], "name": "Computer Science", "code": "DCOMP", "status": "active"}])
 
-    def test_a_taken_name_answers_with_the_existing_id(self):
-        faculty = Faculty.objects.create(name="Science", code="SCI")
-        res = self._post(self.FACULTIES, {"name": "science"})
+    def test_without_a_code_one_is_made_from_the_name(self):
+        Department.objects.create(name="Department of Commerce and Sales", code="DCS")
+        res = self._post(self.DEPARTMENTS, {"name": "Department of Computer Science"})
+        self.assertEqual((res.status_code, res.data["code"]), (201, "DCS2"))
+
+    def test_a_taken_name_or_code_is_refused(self):
+        existing = Department.objects.create(name="Physics", code="PHY")
+        res = self._post(self.DEPARTMENTS, {"name": "physics", "code": "NEW"})
         self.assertEqual(res.status_code, 409)
-        self.assertEqual(res.data, {"detail": "That name is already in use.", "code": "name_taken", "id": faculty.id})
+        self.assertEqual(res.data, {"detail": "That name is already in use.", "code": "name_taken", "id": existing.id})
+        res = self._post(self.DEPARTMENTS, {"name": "Applied Physics", "code": "phy"})
+        self.assertEqual((res.status_code, res.data["code"]), (409, "code_taken"))
 
-    def test_a_department_is_created_in_its_faculty(self):
-        faculty = Faculty.objects.create(name="Science", code="SCI")
-        res = self._post(self.DEPARTMENTS, {"faculty_id": faculty.id, "name": "Department of Computer Science"})
-        self.assertEqual(res.status_code, 201)
-        self.assertEqual(res.data["faculty_id"], faculty.id)
-        self.assertEqual(res.data["code"], "DCS")
-        self.assertTrue(Department.objects.filter(name="Department of Computer Science", faculty=faculty).exists())
-
-        again = self._post(self.DEPARTMENTS, {"faculty_id": faculty.id, "name": "department of computer science"})
-        self.assertEqual(again.status_code, 409)
-        self.assertEqual(again.data["id"], res.data["id"])
-
-    def test_a_department_needs_a_known_faculty(self):
-        for faculty_id in (None, "abc", 999):
-            res = self._post(self.DEPARTMENTS, {"faculty_id": faculty_id, "name": "Physics"})
-            self.assertEqual(res.status_code, 400)
-            self.assertEqual(res.data["code"], "unknown_faculty")
+    def test_a_malformed_code_is_refused(self):
+        res = self._post(self.DEPARTMENTS, {"name": "Physics", "code": "<script>"})
+        self.assertEqual((res.status_code, res.data["code"]), (400, "bad_code"))

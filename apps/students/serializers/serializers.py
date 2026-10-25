@@ -61,11 +61,6 @@ class StudentDetailSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
     department = DepartmentSerializer(read_only=True)
     program = ProgramSerializer(read_only=True)
-    faculty_name = serializers.CharField(
-        source="faculty.name",
-        read_only=True,
-        allow_null=True,
-    )
 
     gender_display = serializers.CharField(
         source="get_gender_display",
@@ -101,7 +96,6 @@ class StudentDetailSerializer(serializers.ModelSerializer):
             "email",
             "phone_number",
             "date_of_birth",
-            "faculty_name",
             "department",
             "program",
             "current_study_year",

@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from .directory_views import AttendanceDepartmentsView, AttendanceFacultiesView
+from .directory_views import AttendanceDepartmentsView
 from .generator_views import GeneratorPublicationView, GeneratorPublishView
 
 from .views import (
@@ -36,11 +36,6 @@ urlpatterns = [
         "attendance/student-units/",
         AttendanceStudentUnitsView.as_view(),
         name="integrations-attendance-student-units",
-    ),
-    path(
-        "attendance/faculties/",
-        AttendanceFacultiesView.as_view(),
-        name="integrations-attendance-faculties",
     ),
     path(
         "attendance/departments/",

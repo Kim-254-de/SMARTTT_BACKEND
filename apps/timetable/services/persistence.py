@@ -4,7 +4,7 @@ from django.db import transaction
 
 from apps.units.models import Unit
 from apps.programs.models import Program
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
 from apps.lecturers.models import Lecturer
 from apps.rooms.models import Room
 from apps.timetable.models import AcademicTerm, TimetableSlot
@@ -30,14 +30,10 @@ class TimetablePersistenceService:
             "lecturer": {},
         }
 
-        # 1. Default Department & Faculty
-        default_faculty, _ = Faculty.objects.get_or_create(
-            code="GEN",
-            defaults={"name": "General Faculty"}
-        )
+        # 1. Default Department
         default_dept, _ = Department.objects.get_or_create(
             code="COMP",
-            defaults={"name": "School of Computing", "faculty": default_faculty}
+            defaults={"name": "School of Computing"}
         )
         cache["department"]["comp"] = default_dept
 

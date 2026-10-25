@@ -85,7 +85,6 @@ class StudentSelector:
             "user",
             "department",
             "program",
-            "faculty",
         ).prefetch_related(
             "academic_progress",
             "enrollments__curriculum",

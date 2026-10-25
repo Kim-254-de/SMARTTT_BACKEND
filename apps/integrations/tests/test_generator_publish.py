@@ -6,12 +6,13 @@ from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import User
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
 from apps.integrations import attendance_push
 from apps.lecturers.models import Lecturer
 from apps.programs.models import Program
 from apps.rooms.models import Room
-from apps.timetable.models import AcademicTerm, TimetablePublication, TimetableSlot
+from apps.integrations.services import get_lecturer_units
+from apps.timetable.models import AcademicTerm, AllocationDocument, TimetablePublication, TimetableSlot
 from apps.units.models import Unit
 
 KEY = "test-generator-key"
@@ -26,12 +27,12 @@ class InlineThread:
         self.target(*self.args)
 
 
-@override_settings(GENERATOR_API_KEY=KEY, ATTENDANCE_BASE_URL="", ATTENDANCE_API_KEY="")
-class GeneratorPublishTests(APITestCase):
+class PublishCase(APITestCase):
+    """Departments, a programme, a unit and a hall, and helpers to publish a payload."""
+
     def setUp(self):
-        faculty = Faculty.objects.create(name="Science", code="FSC")
-        self.cs = Department.objects.create(faculty=faculty, name="Computer Science", code="CS")
-        self.edu = Department.objects.create(faculty=faculty, name="Education", code="ED")
+        self.cs = Department.objects.create(name="Computer Science", code="CS")
+        self.edu = Department.objects.create(name="Education", code="ED")
         self.bsc = Program.objects.create(department=self.cs, code="BSC.COMP SCI", name="BSc Computer Science")
         self.cosc = Unit.objects.create(code="COSC 103", name="Computer Applications", credit_hours=3, department=self.cs)
         self.hall = Room.objects.create(code="STB 1", name="STB 1", building="STB", capacity=120)
@@ -77,6 +78,10 @@ class GeneratorPublishTests(APITestCase):
         with self.captureOnCommitCallbacks(execute=True):
             return self.client.post(URL, payload, format="json", HTTP_X_API_KEY=key)
 
+
+
+@override_settings(GENERATOR_API_KEY=KEY, ATTENDANCE_BASE_URL="", ATTENDANCE_API_KEY="")
+class GeneratorPublishTests(PublishCase):
     def test_needs_the_generators_own_key(self):
         self.assertEqual(self.client.post(URL, {}, format="json").status_code, 403)
         self.assertEqual(self.post(self.payload([self.session()]), key="wrong").status_code, 403)
@@ -212,3 +217,104 @@ class GeneratorPublishTests(APITestCase):
         self.assertEqual(res.status_code, 201, res.content)
         post.assert_called_once()
         self.assertEqual(post.call_args.kwargs["json"], {"staff_number": "STF/0001", "unit_codes": ["COSC 103 GR A"]})
+
+
+@override_settings(GENERATOR_API_KEY=KEY, ATTENDANCE_BASE_URL="", ATTENDANCE_API_KEY="")
+class GeneratorLecturerAndTermTests(PublishCase):
+    """The Generator's lecturers reach the slots by SMARTTT's own rules, and its term becomes current when due."""
+
+    def lecturer(self, staff_number, first, last):
+        user = User.objects.create_user(
+            username=staff_number, password="x", role=User.Role.LECTURER,
+            university_id=staff_number, first_name=first, last_name=last,
+        )
+        return Lecturer.objects.create(user=user, department=self.cs)
+
+    def test_links_the_generators_lecturer_by_staff_number_and_attendance_sees_the_class(self):
+        peter = self.lecturer("STF/0001", "Peter", "Kamami")
+        res = self.post(self.payload([self.session(lecturer_staff_number="stf/0001", lecturer_name="Peter Kamami")]))
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(res.data["lecturers"], {"assigned": 1, "unmatched": [], "left_to_allocation": 0})
+
+        slot = TimetableSlot.objects.get()
+        self.assertEqual((slot.lecturer, slot.lecturer_name_text, slot.allocation_document), (peter, "Peter Kamami", None))
+        # What Smart Attendance's sync reads for the lecturer.
+        units = get_lecturer_units("STF/0001").units
+        self.assertEqual([u["code"] for u in units], ["COSC 103 GR A"])
+
+    def test_falls_back_to_the_name_and_keeps_an_unknown_lecturers_name(self):
+        jane = self.lecturer("STF/0002", "Jane", "Otieno")
+        known = self.session(lecturer_staff_number="STF/9999", lecturer_name="Dr. Jane Otieno")
+        unknown = self.session("COSC103-GRB-1", group_label="GR B", start_time="14:00", end_time="16:00", lecturer_staff_number="STF/0404", lecturer_name="Nobody Here")
+        res = self.post(self.payload([known, unknown]))
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual((res.data["lecturers"]["assigned"], res.data["lecturers"]["unmatched"]), (1, ["STF/0404"]))
+        a = TimetableSlot.objects.get(class_group="GR_A")
+        b = TimetableSlot.objects.get(class_group="GR_B")
+        self.assertEqual((a.lecturer, a.lecturer_name_text), (jane, "Dr. Jane Otieno"))
+        self.assertEqual((b.lecturer, b.lecturer_name_text), (None, "Nobody Here"))
+
+    def test_a_departments_allocation_document_wins(self):
+        self.lecturer("STF/0001", "Peter", "Kamami")
+        jane = self.lecturer("STF/0002", "Jane", "Otieno")
+        AllocationDocument.objects.create(
+            source="Computer Science", academic_year="2026/2027", file_name="cs.docx",
+            rows=[{"unit_code": "COSC103", "raw_unit_code": "COSC 103", "lecturer_name": "Jane Otieno", "placeholder": False,
+                   "group": "", "subgroups": [], "group_combinations": [], "year_of_study": 1, "semester": 1,
+                   "odel": False, "section": "", "programme": "BACHELOR OF SCIENCE IN COMPUTER SCIENCE", "source_file": "cs.docx"}],
+        )
+        generator_says = self.session(lecturer_staff_number="STF/0001", lecturer_name="Peter Kamami")
+        self.assertEqual(self.post(self.payload([generator_says])).status_code, 201)
+        slot = TimetableSlot.objects.get()
+        self.assertEqual((slot.lecturer, slot.lecturer_name_text), (jane, "Jane Otieno"))
+        self.assertIsNotNone(slot.allocation_document_id)
+
+        # A later version leaves the document's slot alone.
+        res = self.post(self.payload([generator_says], version=2, based_on=1))
+        self.assertEqual(res.data["lecturers"], {"assigned": 0, "unmatched": [], "left_to_allocation": 1})
+        self.assertEqual(TimetableSlot.objects.get().lecturer, jane)
+
+    def test_a_session_without_a_lecturer_leaves_the_slots_lecturer_alone(self):
+        self.post(self.payload([self.session()]))
+        by_hand = self.lecturer("STF/0003", "Hand", "Set")
+        TimetableSlot.objects.update(lecturer=by_hand, lecturer_name_text="Hand Set")
+        res = self.post(self.payload([self.session(lecturer_staff_number=None, lecturer_name="")], version=2, based_on=1))
+        self.assertEqual(res.data["lecturers"]["assigned"], 0)
+        self.assertEqual(TimetableSlot.objects.get().lecturer, by_hand)
+
+    @override_settings(ATTENDANCE_BASE_URL="https://attendance.test.local", ATTENDANCE_API_KEY="att-key")
+    def test_tells_attendance_about_the_lecturer_losing_and_the_one_gaining_a_class(self):
+        self.lecturer("STF/0001", "Peter", "Kamami")
+        self.lecturer("STF/0002", "Jane", "Otieno")
+        with mock.patch.object(attendance_push.threading, "Thread", InlineThread), \
+                mock.patch.object(attendance_push.requests, "post") as post:
+            post.return_value = mock.Mock(status_code=200, text="")
+            self.post(self.payload([self.session(lecturer_staff_number="STF/0001")]))
+            self.assertEqual([c.kwargs["json"]["staff_number"] for c in post.call_args_list], ["STF/0001"])
+            post.reset_mock()
+            self.post(self.payload([self.session(lecturer_staff_number="STF/0002")], version=2, based_on=1))
+        self.assertEqual(sorted(c.kwargs["json"]["staff_number"] for c in post.call_args_list), ["STF/0001", "STF/0002"])
+
+    def test_the_term_becomes_current_when_none_is(self):
+        res = self.post(self.payload([self.session()], term_start="2020-01-06", term_end="2020-04-30"))
+        self.assertEqual((res.data["is_current"], res.data["made_current"]), (True, True))
+        self.assertTrue(AcademicTerm.objects.get().is_current)
+
+    def test_the_term_takes_over_when_today_is_within_its_dates(self):
+        old = AcademicTerm.objects.create(academic_year="2025/2026", semester=3, start_date=date(2026, 5, 4), end_date=date(2026, 8, 21), is_current=True)
+        today = date(2026, 10, 24)
+        with mock.patch("apps.integrations.generator_publish.timezone.localdate", return_value=today):
+            res = self.post(self.payload([self.session()]))  # 2026-09-07 .. 2026-12-18
+        self.assertTrue(res.data["made_current"])
+        old.refresh_from_db()
+        self.assertFalse(old.is_current)
+        self.assertEqual(AcademicTerm.objects.filter(is_current=True).count(), 1)
+
+    def test_a_term_published_ahead_of_time_waits_for_the_administrator(self):
+        current = AcademicTerm.objects.create(academic_year="2026/2027", semester=1, start_date=date(2026, 9, 7), end_date=date(2026, 12, 18), is_current=True)
+        with mock.patch("apps.integrations.generator_publish.timezone.localdate", return_value=date(2026, 10, 24)):
+            res = self.post(self.payload([self.session()], semester=2, term_start="2027-01-04", term_end="2027-04-30"))
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual((res.data["is_current"], res.data["made_current"]), (False, False))
+        current.refresh_from_db()
+        self.assertTrue(current.is_current)

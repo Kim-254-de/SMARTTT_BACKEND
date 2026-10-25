@@ -21,6 +21,7 @@ POST /api/v1/integrations/generator/publish/   (X-API-Key = GENERATOR_API_KEY)
         "group_label": "GR A" | null,
         "room": {"code": "STB 1", "building": "STB", "capacity": 120, "room_type": "lecture_hall"},
         "day_of_week": "TUE", "start_time": "10:00", "end_time": "12:00",
+        "lecturer_staff_number": "STF/0001" | null, "lecturer_name": "Peter Kamami" | null,
         "class_rows": [{"label": "BED.ARTS Y1S1", "program_id": null, "program_code": "BED.ARTS",
                         "year_of_study": 1, "study_semester": 1, "stream": "",
                         "department_smarttt_id": 9 | null}]
@@ -43,6 +44,18 @@ Rules, all checked before anything is written, in one transaction:
   Generator sends (code, name, the owning department, capacity and type),
   never invented; a department not yet in SMARTTT is refused (422).
 
+Lecturers: the Generator's lecturer for a session (from the Allocator) is
+set on its slots the way an allocation document's would be, by staff number
+(the account Smart Attendance signs in with) or else by name
+(LecturerDirectory), always keeping the name in lecturer_name_text. A
+department's allocation document still wins: a slot one claims is left to
+it, and the documents are re-applied after every publish. A session sent
+without a lecturer leaves its slots' lecturer as it was (it may be set by hand).
+
+The term becomes the current one when no term is current yet, or when today
+falls within its dates; otherwise switching it over stays the
+administrator's call (set-current), e.g. a next semester published early.
+
 After it is saved, the year's lecturer allocation documents are re-applied
 (as after a PDF upload), cached personal timetables are cleared, and Smart
 Attendance is told which lecturers' classes moved.
@@ -59,15 +72,19 @@ from datetime import date, time
 from decimal import Decimal
 
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import serializers
 
 from apps.departments.models import Department
+from apps.lecturers.models import Lecturer
 from apps.programs.models import Program
 from apps.rooms.models import Room
 from apps.timetable.models import AcademicTerm, TimetablePublication, TimetableSlot
+from apps.timetable.services.allocation_service import LecturerDirectory
 from apps.units.models import Unit
 
 from .attendance_push import queue_timetable_changes, timetable_change_payload
+from .services import find_lecturer_account
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +137,8 @@ class _Session(serializers.Serializer):
     day_of_week = serializers.ChoiceField(choices=DAYS)
     start_time = serializers.TimeField(format="%H:%M", input_formats=["%H:%M"])
     end_time = serializers.TimeField(format="%H:%M", input_formats=["%H:%M"])
+    lecturer_staff_number = serializers.CharField(max_length=64, allow_null=True, allow_blank=True, required=False)
+    lecturer_name = serializers.CharField(max_length=255, allow_null=True, allow_blank=True, required=False)
     class_rows = _ClassRow(many=True, allow_empty=False)
 
 
@@ -226,6 +245,9 @@ def publish(data: dict) -> tuple[int, dict]:
         created = _Created()
         wanted = _wanted_slots(data["sessions"], created)
         changes, changed_payloads = _apply(term, wanted, replace_uploaded=uploaded_count > 0)
+        lecturers = _assign_lecturers(term, wanted, data["sessions"])
+        changed_payloads += lecturers.pop("payloads")
+        made_current = _make_current_if_due(term)
         # SMARTTT's id for each unit, so the Generator can link the ones it entered itself.
         units = {
             next(s["unit_code"] for s in data["sessions"] if s["key"] == w.session_key): w.unit.pk
@@ -241,6 +263,9 @@ def publish(data: dict) -> tuple[int, dict]:
             "slot_count": len(wanted),
             "changes": changes,
             "replaced_uploaded_slots": uploaded_count,
+            "lecturers": lecturers,
+            "is_current": term.is_current,
+            "made_current": made_current,
             "created": {"units": created.units, "rooms": created.rooms, "programs": created.programs},
             "units": units,
         }
@@ -492,6 +517,82 @@ def _apply(term: AcademicTerm, wanted: dict[str, _Wanted], replace_uploaded: boo
         "unchanged": len(unchanged - moved - set(added_keys)),
     }
     return changes, payloads
+
+
+def _make_current_if_due(term: AcademicTerm) -> bool:
+    """
+    As AcademicTermViewSet.set_current does it, but only when it can't surprise
+    anyone: no term is current yet, or today is inside this term's dates.
+    """
+    if term.is_current:
+        return False
+    today = timezone.localdate()
+    nothing_current = not AcademicTerm.objects.filter(is_current=True).exists()
+    if not (nothing_current or term.start_date <= today <= term.end_date):
+        return False
+    AcademicTerm.objects.filter(is_current=True).exclude(pk=term.pk).update(is_current=False)
+    term.is_current = True
+    term.save(update_fields=["is_current"])
+    return True
+
+
+def _assign_lecturers(term: AcademicTerm, wanted: dict[str, _Wanted], sessions: list[dict]) -> dict:
+    """
+    Sets each session's lecturer on its slots, resolved the way allocation
+    documents are: the account with that staff number, else the one lecturer
+    whose names match (LecturerDirectory); the name is kept either way.
+    Slots an allocation document claims are left to it. Returns counts and the
+    Attendance pushes for lecturers who gained or lost a class.
+    """
+    by_session = {
+        s["key"]: ((s.get("lecturer_staff_number") or "").strip().upper(), (s.get("lecturer_name") or "").strip())
+        for s in sessions
+    }
+    by_session = {k: v for k, v in by_session.items() if v[0] or v[1]}
+    result = {"assigned": 0, "unmatched": [], "left_to_allocation": 0, "payloads": []}
+    if not by_session:
+        return result
+
+    directory = None
+    resolved: dict[tuple[str, str], Lecturer | None] = {}
+
+    def resolve(staff_number: str, name: str) -> Lecturer | None:
+        nonlocal directory
+        if (staff_number, name) not in resolved:
+            account = find_lecturer_account(staff_number) if staff_number else None
+            lecturer = Lecturer.objects.filter(user=account).first() if account else None
+            if lecturer is None and name:
+                directory = directory or LecturerDirectory()
+                lecturer = directory.match(name)
+            resolved[(staff_number, name)] = lecturer
+        return resolved[(staff_number, name)]
+
+    session_of = {w.key: w.session_key for w in wanted.values() if w.session_key in by_session}
+    slots = TimetableSlot.objects.select_related("unit", "lecturer__user").filter(term=term, generator_key__in=list(session_of))
+    changed: list[TimetableSlot] = []
+    unmatched: set[str] = set()
+    for slot in slots:
+        if slot.allocation_document_id:
+            result["left_to_allocation"] += 1
+            continue
+        staff_number, name = by_session[session_of[slot.generator_key]]
+        lecturer = resolve(staff_number, name)
+        if lecturer is None:
+            unmatched.add(staff_number or name)
+        display = name or (lecturer.user.get_full_name() if lecturer else staff_number)
+        if (slot.lecturer_id, slot.lecturer_name_text) == ((lecturer.pk if lecturer else None), display):
+            continue
+        if slot.lecturer_id:
+            result["payloads"].append(timetable_change_payload(slot))  # the lecturer losing the class
+        slot.lecturer = lecturer
+        slot.lecturer_name_text = display
+        if lecturer is not None:
+            result["payloads"].append(timetable_change_payload(slot))  # and the one gaining it
+            result["assigned"] += 1
+        changed.append(slot)
+    TimetableSlot.objects.bulk_update(changed, ["lecturer", "lecturer_name_text"], batch_size=500)
+    result["unmatched"] = sorted(unmatched)
+    return result
 
 
 def _after_publish(term: AcademicTerm) -> None:

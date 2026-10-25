@@ -1,3 +1,3 @@
-from .models import Department, Faculty, DepartmentAdmin
+from .models import Department, DepartmentAdmin
 
-__all__ = ['Department', 'Faculty', 'DepartmentAdmin']
+__all__ = ['Department', 'DepartmentAdmin']

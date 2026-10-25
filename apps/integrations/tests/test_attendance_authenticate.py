@@ -3,7 +3,7 @@ from django.urls import reverse
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import User, ValidStaffID
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
 from apps.lecturers.models import Lecturer
 from apps.programs.models import Program
 from apps.students.models import Student
@@ -16,8 +16,7 @@ PASSWORD = "correct horse"
 @override_settings(ATTENDANCE_API_KEY=KEY)
 class AttendanceAuthenticateTests(APITestCase):
     def setUp(self):
-        faculty = Faculty.objects.create(name="Science", code="FSC")
-        self.dept = Department.objects.create(faculty=faculty, name="Computer Science", code="CS")
+        self.dept = Department.objects.create(name="Computer Science", code="CS")
         self.program = Program.objects.create(department=self.dept, name="BSc Computer Science", code="BSCCS")
 
     def _post(self, identifier, password=PASSWORD, key=KEY):

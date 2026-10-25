@@ -1,20 +1,21 @@
 """
-Faculties and departments, for the Smart Attendance backend (X-API-Key).
+Departments, for the Smart Attendance backend (X-API-Key).
 
-SMARTTT owns the university's faculties and departments. Attendance keeps a
-copy linked by SMARTTT's id (its officers, terminals and oversight hang off
-it), reads them from here, and creates new ones here first: an administrator
-adding a faculty, or a faculty officer adding a department, in the attendance
-portals. Attendance decides who may do that; this only trusts the key.
+SMARTTT owns the university's departments; faculties play no part. Attendance
+keeps a copy linked by SMARTTT's id (its officers, terminals and oversight
+hang off it), reads them from here, and creates new ones here first when an
+administrator adds one in the admin console. Attendance decides who may do
+that; this only trusts the key.
 
-GET  attendance/faculties/     -> {"faculties": [{"id", "name", "code"}]}
-POST attendance/faculties/     {"name", "code"?} -> 201 the faculty
-GET  attendance/departments/   -> {"departments": [{"id", "name", "code", "faculty_id", "status"}]}
-POST attendance/departments/   {"faculty_id", "name", "code"?} -> 201 the department
+GET  attendance/departments/   -> {"departments": [{"id", "name", "code", "status"}]}
+POST attendance/departments/   {"name", "code"?} -> 201 the department
 
-A name already in use is a 409 {"code": "name_taken", "id": <existing id>}, so
-the caller can link to it instead of creating a second one. A code, when not
-given, is made from the name's initials ("Faculty of Science" -> "FS").
+The code is unique across the university: the Timetable Allocator and
+Generator know a department by it. When not given, one is made from the
+name's initials ("Department of Computer Science" -> "DCS"). A name already
+in use is a 409 {"code": "name_taken", "id": <existing id>}, so the caller can
+link to it instead of creating a second one; a code already in use is a 409
+{"code": "code_taken"}.
 """
 from __future__ import annotations
 
@@ -24,22 +25,20 @@ from django.db import IntegrityError, transaction
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
+from apps.departments.services.department_lookup import free_department_code
 
 from .permissions import HasAttendanceApiKey
 
 _FILLER = {"OF", "AND", "THE", "FOR", "IN", "&"}
-
-
-def _faculty_dict(f: Faculty) -> dict:
-    return {"id": f.id, "name": f.name, "code": f.code}
+CODE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ./&-]{0,31}$")
 
 
 def _department_dict(d: Department) -> dict:
-    return {"id": d.id, "name": d.name, "code": d.code, "faculty_id": d.faculty_id, "status": d.status}
+    return {"id": d.id, "name": d.name, "code": d.code, "status": d.status}
 
 
-def _clean_name(value) -> str:
+def _clean(value) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
@@ -48,44 +47,8 @@ def _initials(name: str) -> str:
     return "".join(w[0] for w in words)[:24] or "X"
 
 
-def _free_code(wanted: str, taken: set[str]) -> str:
-    """`wanted`, or `wanted2`, `wanted3` ... when it's taken."""
-    code, n = wanted, 1
-    while code.upper() in taken:
-        n += 1
-        code = f"{wanted}{n}"
-    return code
-
-
 def _taken(existing_id) -> Response:
     return Response({"detail": "That name is already in use.", "code": "name_taken", "id": existing_id}, status=409)
-
-
-class AttendanceFacultiesView(APIView):
-    authentication_classes: list = []
-    permission_classes = [HasAttendanceApiKey]
-
-    def get(self, request):
-        return Response({"faculties": [_faculty_dict(f) for f in Faculty.objects.order_by("name")]})
-
-    def post(self, request):
-        name = _clean_name(request.data.get("name"))
-        if not name or len(name) > 255:
-            return Response({"detail": "A faculty name of up to 255 characters is required."}, status=400)
-        existing = Faculty.objects.filter(name__iexact=name).first()
-        if existing:
-            return _taken(existing.id)
-        taken = {c.upper() for c in Faculty.objects.values_list("code", flat=True)}
-        code = _clean_name(request.data.get("code"))[:32] or _free_code(_initials(name), taken)
-        if code.upper() in taken:
-            return Response({"detail": f"The faculty code {code} is already in use.", "code": "code_taken"}, status=409)
-        try:
-            with transaction.atomic():
-                faculty = Faculty.objects.create(name=name, code=code)
-        except IntegrityError:  # a concurrent create with the same name or code
-            existing = Faculty.objects.filter(name__iexact=name).first()
-            return _taken(existing.id if existing else None)
-        return Response(_faculty_dict(faculty), status=201)
 
 
 class AttendanceDepartmentsView(APIView):
@@ -93,30 +56,28 @@ class AttendanceDepartmentsView(APIView):
     permission_classes = [HasAttendanceApiKey]
 
     def get(self, request):
-        departments = Department.objects.order_by("faculty__name", "name")
-        return Response({"departments": [_department_dict(d) for d in departments]})
+        return Response({"departments": [_department_dict(d) for d in Department.objects.order_by("name")]})
 
     def post(self, request):
-        name = _clean_name(request.data.get("name"))
+        name = _clean(request.data.get("name"))
         if not name or len(name) > 255:
             return Response({"detail": "A department name of up to 255 characters is required."}, status=400)
-        faculty = Faculty.objects.filter(pk=request.data.get("faculty_id")).first() if str(
-            request.data.get("faculty_id") or ""
-        ).isdigit() else None
-        if faculty is None:
-            return Response({"detail": "No such faculty in SMARTTT.", "code": "unknown_faculty"}, status=400)
-        # Attendance keeps department names unique across the university, so check them all.
+        code = _clean(request.data.get("code")).upper()
+        if code and not CODE.match(code):
+            return Response({"detail": "A department code is up to 32 letters, digits, spaces or . / & -.", "code": "bad_code"}, status=400)
         existing = Department.objects.filter(name__iexact=name).first()
         if existing:
             return _taken(existing.id)
-        taken = {c.upper() for c in Department.objects.filter(faculty=faculty).values_list("code", flat=True)}
-        code = _clean_name(request.data.get("code"))[:32] or _free_code(_initials(name), taken)
-        if code.upper() in taken:
+        if not code:
+            code = free_department_code(_initials(name))
+        elif Department.objects.filter(code__iexact=code).exists():
             return Response({"detail": f"The department code {code} is already in use.", "code": "code_taken"}, status=409)
         try:
             with transaction.atomic():
-                department = Department.objects.create(faculty=faculty, name=name, code=code)
-        except IntegrityError:
+                department = Department.objects.create(name=name, code=code)
+        except IntegrityError:  # a concurrent create with the same name or code
             existing = Department.objects.filter(name__iexact=name).first()
-            return _taken(existing.id if existing else None)
+            if existing:
+                return _taken(existing.id)
+            return Response({"detail": f"The department code {code} is already in use.", "code": "code_taken"}, status=409)
         return Response(_department_dict(department), status=201)

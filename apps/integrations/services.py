@@ -455,7 +455,7 @@ def find_staff(staff_number: str) -> dict | None:
 
     account = (
         User.objects.filter(role=User.Role.LECTURER, university_id__iexact=number, is_active=True)
-        .select_related("lecturer_profile__department__faculty")
+        .select_related("lecturer_profile__department")
         .first()
     )
     lecturer = getattr(account, "lecturer_profile", None) if account else None
@@ -466,7 +466,6 @@ def find_staff(staff_number: str) -> dict | None:
         "full_name": (account.get_full_name().strip() if account else "") or listed.name_hint.strip() or None,
         "email": ((account.email or "").strip().lower() if account else "") or None,
         "department": department.name if department else None,
-        "faculty": department.faculty.name if department and department.faculty_id else None,
         "title": ((lecturer.rank or "").strip() or None) if lecturer else None,
         "has_account": account is not None,
         "is_active": True,
