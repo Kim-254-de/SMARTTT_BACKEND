@@ -1,6 +1,7 @@
 from django.urls import include, path
 
 from .directory_views import AttendanceDepartmentsView
+from .exam_views import ExamCloseView, ExamModeView, ExamPublishView, ExamSwitchView
 from .generator_views import GeneratorPublicationView, GeneratorPublishView
 
 from .views import (
@@ -49,6 +50,11 @@ urlpatterns = [
         GeneratorPublicationView.as_view(),
         name="integrations-generator-publication",
     ),
+    # The exam timetable and switching the term to exams (exam_publish.py, exam_mode.py).
+    path("generator/exam-publish/", ExamPublishView.as_view(), name="integrations-generator-exam-publish"),
+    path("generator/exam-mode/", ExamModeView.as_view(), name="integrations-generator-exam-mode"),
+    path("generator/exam-switch/", ExamSwitchView.as_view(), name="integrations-generator-exam-switch"),
+    path("generator/exam-close/", ExamCloseView.as_view(), name="integrations-generator-exam-close"),
     # SMARTTT's admin functions for the unified admin console (acting_admin.py).
     path("admin/", include("apps.integrations.admin_urls")),
 ]

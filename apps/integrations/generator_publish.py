@@ -282,6 +282,11 @@ def publish(data: dict) -> tuple[int, dict]:
         queue_timetable_changes(changed_payloads)
 
     _after_publish(term)
+    from .exam_mode import close_for_next_teaching
+
+    closed = close_for_next_teaching(term)
+    if closed:
+        result["closed_exam_periods"] = closed
     return 201, result
 
 

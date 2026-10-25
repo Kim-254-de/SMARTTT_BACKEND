@@ -38,6 +38,12 @@ class Command(BaseCommand):
         if not term:
             self.stdout.write("No current academic term; no reminders sent.")
             return
+        if term.in_exam_mode:
+            # Exam reminders replace class reminders while the term is in exam mode.
+            from apps.integrations.exam_notifications import send_exam_reminders
+
+            self.stdout.write(self.style.SUCCESS(f"Sent {send_exam_reminders()} exam reminder(s)."))
+            return
 
         now = timezone.localtime()
         sent = 0
