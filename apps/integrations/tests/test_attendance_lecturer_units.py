@@ -6,7 +6,7 @@ from rest_framework.test import APITestCase
 
 from apps.accounts.models import User
 from apps.courses.models import StudentUnit
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
 from apps.lecturers.models import Lecturer
 from apps.rooms.models import Room
 from apps.timetable.models import AcademicTerm, TimetableSlot
@@ -19,8 +19,7 @@ URL = reverse("integrations-attendance-lecturer-units")
 @override_settings(ATTENDANCE_API_KEY=KEY)
 class AttendanceLecturerUnitsTests(APITestCase):
     def setUp(self):
-        faculty = Faculty.objects.create(name="Science", code="FSC")
-        self.dept = Department.objects.create(faculty=faculty, name="Computer Science", code="CS")
+        self.dept = Department.objects.create(name="Computer Science", code="CS")
         self.room = Room.objects.create(code="LH1", name="Lecture Hall 1", building="Main", capacity=100)
         self.room2 = Room.objects.create(code="LAB2", name="Lab 2", building="Main", capacity=40)
         self.term = AcademicTerm.objects.create(

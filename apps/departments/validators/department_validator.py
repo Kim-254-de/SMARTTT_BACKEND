@@ -1,15 +1,10 @@
 from rest_framework.exceptions import ValidationError
-from apps.departments.models import Faculty, Department
+from apps.departments.models import Department
 
 
-def validate_unique_faculty_code(code):
-    if Faculty.objects.filter(code__iexact=code).exists():
-        raise ValidationError(f"Faculty code '{code}' already exists.")
-
-
-def validate_unique_department_code(faculty, code):
-    if Department.objects.filter(faculty=faculty, code__iexact=code).exists():
-        raise ValidationError(f"Department code '{code}' already exists in this faculty.")
+def validate_unique_department_code(code):
+    if Department.objects.filter(code__iexact=code).exists():
+        raise ValidationError(f"Department code '{code}' already exists.")
 
 
 def validate_department_admin_assignment(user, department):

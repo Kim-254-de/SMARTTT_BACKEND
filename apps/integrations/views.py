@@ -98,7 +98,7 @@ class AttendanceStaffLookupView(APIView):
 
     200 -> {"staff_number": "STF/0001", "full_name": "..." | null,
             "email": "..." | null, "department": "..." | null,
-            "faculty": "..." | null, "title": "..." | null,
+            "title": "..." | null,
             "has_account": true, "is_active": true}
     404 -> the staff number is not on the approved staff list.
     """

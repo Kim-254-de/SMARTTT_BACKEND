@@ -31,6 +31,9 @@ services:
       # The Smart Attendance backend's URL, so rescheduled classes reach it at once. Set in the dashboard.
       - key: ATTENDANCE_BASE_URL
         sync: false
+      # Shared with the Timetable Generator (its SMARTTT_API_KEY): it publishes the master timetable. Set in the dashboard.
+      - key: GENERATOR_API_KEY
+        sync: false
 
   - type: cron
     name: smarttt-class-reminders

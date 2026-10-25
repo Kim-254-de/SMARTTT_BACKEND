@@ -11,7 +11,7 @@ from docx import Document
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import User
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
 from apps.lecturers.models import Lecturer
 from apps.programs.models import Program
 from apps.rooms.models import Room
@@ -221,8 +221,7 @@ DEDU = "DEPARTMENT OF EDUCATION"
 
 class AssignLecturersAPITests(APITestCase):
     def setUp(self):
-        faculty = Faculty.objects.create(name="Education", code="EDU")
-        self.dept = Department.objects.create(faculty=faculty, name="Education", code="DEDU")
+        self.dept = Department.objects.create(name="Education", code="DEDU")
         self.term = AcademicTerm.objects.create(
             academic_year="2026/2027", semester=1, start_date=date(2026, 9, 1),
             end_date=date(2026, 12, 20), is_current=True,

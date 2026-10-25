@@ -1,10 +1,15 @@
 from django.test import TestCase
-from apps.departments.models import Faculty, Department
+from apps.departments.models import Department
 
 
 class DepartmentModelTests(TestCase):
-    def test_create_faculty_and_department(self):
-        f = Faculty.objects.create(name="Test Faculty", code="TF")
-        d = Department.objects.create(faculty=f, name="Test Dept", code="TD")
-        self.assertEqual(str(f), "Test Faculty (TF)")
+    def test_create_department_without_a_faculty(self):
+        d = Department.objects.create(name="Test Dept", code="TD")
         self.assertEqual(str(d), "Test Dept (TD)")
+
+    def test_codes_are_unique_across_the_university(self):
+        from django.db import IntegrityError
+
+        Department.objects.create(name="Test Dept", code="TD")
+        with self.assertRaises(IntegrityError):
+            Department.objects.create(name="Other Dept", code="TD")

@@ -5,7 +5,7 @@ from django.test import override_settings
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import User
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
 from apps.integrations import attendance_push
 from apps.lecturers.models import Lecturer
 from apps.rooms.models import Room
@@ -32,8 +32,7 @@ class InlineThread:
 @mock.patch.object(attendance_push.requests, "post")
 class AttendancePushOnRescheduleTests(APITestCase):
     def setUp(self):
-        faculty = Faculty.objects.create(name="Science", code="FSC")
-        dept = Department.objects.create(faculty=faculty, name="Computer Science", code="CS")
+        dept = Department.objects.create(name="Computer Science", code="CS")
         self.room = Room.objects.create(code="LH1", name="Lecture Hall 1", building="Main", capacity=100)
         self.lab = Room.objects.create(code="LAB2", name="Lab 2", building="Main", capacity=40)
         term = AcademicTerm.objects.create(

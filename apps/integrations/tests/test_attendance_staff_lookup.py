@@ -3,7 +3,7 @@ from django.urls import reverse
 from rest_framework.test import APITestCase
 
 from apps.accounts.models import User, ValidStaffID
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
 from apps.lecturers.models import Lecturer
 
 KEY = "test-attendance-key"
@@ -13,8 +13,7 @@ URL = reverse("integrations-attendance-staff")
 @override_settings(ATTENDANCE_API_KEY=KEY)
 class AttendanceStaffLookupTests(APITestCase):
     def setUp(self):
-        faculty = Faculty.objects.create(name="Science", code="FSC")
-        self.dept = Department.objects.create(faculty=faculty, name="Computer Science", code="CS")
+        self.dept = Department.objects.create(name="Computer Science", code="CS")
 
     def _get(self, key=KEY, **params):
         headers = {"HTTP_X_API_KEY": key} if key is not None else {}
@@ -34,7 +33,7 @@ class AttendanceStaffLookupTests(APITestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data, {
             "staff_number": "STF/0001", "full_name": "Peter Kamami", "email": None,
-            "department": None, "faculty": None, "title": None,
+            "department": None, "title": None,
             "has_account": False, "is_active": True,
         })
 
@@ -48,7 +47,7 @@ class AttendanceStaffLookupTests(APITestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data, {
             "staff_number": "STF/0002", "full_name": "Peter Kamami", "email": "pk@tharaka.ac.ke",
-            "department": "Computer Science", "faculty": "Science", "title": "Dr.",
+            "department": "Computer Science", "title": "Dr.",
             "has_account": True, "is_active": True,
         })
 

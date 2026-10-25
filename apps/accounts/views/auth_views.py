@@ -20,7 +20,8 @@ import resend
 
 from apps.accounts.models import PasswordResetToken, User
 from apps.accounts.serializers.user_serializer import UserSerializer
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
+from apps.departments.services.department_lookup import department_for_name
 from apps.programs.models.program import Program
 from apps.students.models.student import Student
 from apps.timetable.models import AcademicTerm
@@ -130,19 +131,7 @@ class RegisterView(APIView):
         if department_name and course_name:
             try:
                 with transaction.atomic():
-                    dept_code = re.sub(r'[^A-Z]', '', department_name.upper())[:20]
-                    if not dept_code: dept_code = department_name.upper()[:20]
-
-                    faculty, _ = Faculty.objects.get_or_create(
-                        code="GEN",
-                        defaults={'name': 'General Faculty'}
-                    )
-
-                    department, _ = Department.objects.get_or_create(
-                        faculty=faculty,
-                        name=department_name,
-                        defaults={'code': dept_code, 'faculty': faculty}
-                    )
+                    department = department_for_name(department_name)
 
                     prog_code = re.sub(r'[^A-Z]', '', course_name.upper())[:30]
                     if not prog_code: prog_code = course_name.upper()[:30]
@@ -286,19 +275,7 @@ class ProfileView(APIView):
             # rows and will NOT generally match the ones the master
             # timetable upload created, so it should not be relied on
             # once slots exist.
-            dept_code = re.sub(r'[^A-Z]', '', data['department'].upper())[:20]
-            if not dept_code: dept_code = data['department'].upper()[:20]
-
-            faculty, _ = Faculty.objects.get_or_create(
-                code="GEN",
-                defaults={"name": "General", "description": "Default faculty"},
-            )
-
-            dept, _ = Department.objects.get_or_create(
-                faculty=faculty,
-                name=data['department'],
-                defaults={'code': dept_code},
-            )
+            dept = department_for_name(data['department'])
 
             prog_code = re.sub(r'[^A-Z]', '', data['course'].upper())[:30]
             if not prog_code: prog_code = data['course'].upper()[:30]

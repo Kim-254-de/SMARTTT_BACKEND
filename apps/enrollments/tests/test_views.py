@@ -4,7 +4,7 @@ from rest_framework import status
 from django.utils import timezone
 from datetime import date, timedelta
 
-from apps.departments.models import Department, Faculty
+from apps.departments.models import Department
 from apps.programs.models import Program
 from apps.students.models import Student
 from apps.timetable.models import AcademicTerm
@@ -16,9 +16,8 @@ User = get_user_model()
 
 class StudentEnrollmentSyncTests(APITestCase):
     def setUp(self):
-        # Create department/faculty
-        self.faculty = Faculty.objects.create(name="Science", code="SCI")
-        self.dept = Department.objects.create(faculty=self.faculty, name="Computing", code="COMP")
+        # Create department
+        self.dept = Department.objects.create(name="Computing", code="COMP")
         
         # Create program
         self.program = Program.objects.create(

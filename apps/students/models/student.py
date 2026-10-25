@@ -17,7 +17,6 @@ class Student(BaseModel):
     - A user account (authentication/authorization)
     - A department (organizational unit)
     - An academic program (curriculum)
-    - A faculty (parent of department)
     
     Used for:
     - Personalized timetable generation
@@ -93,14 +92,6 @@ class Student(BaseModel):
     date_of_birth = models.DateField(null=True, blank=True)
 
     # Academic Organization
-    faculty = models.ForeignKey(
-        "departments.Department",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="faculty_students",
-        help_text=_("Faculty/College the student belongs to"),
-    )
     department = models.ForeignKey(
         "departments.Department",
         on_delete=models.PROTECT,

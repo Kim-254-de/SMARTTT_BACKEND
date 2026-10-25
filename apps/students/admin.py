@@ -74,7 +74,6 @@ class StudentAdmin(admin.ModelAdmin):
         }),
         (_('Academic Organization'), {
             'fields': (
-                'faculty',
                 'department',
                 'program',
             ),
@@ -143,7 +142,6 @@ class StudentAdmin(admin.ModelAdmin):
             'user',
             'department',
             'program',
-            'faculty',
         )
 
     actions = [

@@ -3,34 +3,26 @@ from django.conf import settings
 from django.utils import timezone
 
 
-class Faculty(models.Model):
-    name = models.CharField(max_length=255, unique=True)
-    code = models.CharField(max_length=32, unique=True)
-    description = models.TextField(blank=True)
-
-    class Meta:
-        verbose_name = "Faculty"
-        verbose_name_plural = "Faculties"
-
-    def __str__(self):
-        return f"{self.name} ({self.code})"
-
-
 class Department(models.Model):
+    """
+    A department of the university. Faculties play no part in timetabling or
+    attendance, so a department stands on its own: its code (e.g. "DCOMP") is
+    unique across the university, and is how the Timetable Allocator and
+    Generator know it. Administrators create them in the admin console
+    (Smart Attendance), which creates them here first.
+    """
+
     STATUS_CHOICES = (("active", "Active"), ("inactive", "Inactive"))
 
-    faculty = models.ForeignKey(Faculty, related_name="departments", on_delete=models.PROTECT)
     name = models.CharField(max_length=255)
-    code = models.CharField(max_length=32)
+    code = models.CharField(max_length=32, unique=True)
     description = models.TextField(blank=True)
     head_of_department = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="headed_departments")
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="active")
     created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
-        unique_together = (("faculty", "code"),)
-        indexes = [models.Index(fields=["faculty", "code"])]
-        ordering = ["faculty", "name"]
+        ordering = ["name"]
 
     def __str__(self):
         return f"{self.name} ({self.code})"

@@ -84,3 +84,26 @@ def notify_attendance_of_reschedule(slot) -> bool:
 
     transaction.on_commit(start)
     return True
+
+
+def queue_timetable_changes(payloads: list[dict]) -> int:
+    """
+    Many changes at once (a published timetable): each distinct lecturer and
+    class is pushed once, after the transaction commits, on one background
+    thread. Returns how many were queued.
+    """
+    if not _enabled():
+        return 0
+    unique: dict[tuple, dict] = {}
+    for payload in payloads:
+        if payload["staff_number"] or payload["unit_codes"]:
+            unique.setdefault((payload["staff_number"], tuple(payload["unit_codes"])), payload)
+    if not unique:
+        return 0
+
+    def send_all():
+        for payload in unique.values():
+            send_timetable_change(payload)
+
+    transaction.on_commit(lambda: threading.Thread(target=send_all, daemon=True).start())
+    return len(unique)

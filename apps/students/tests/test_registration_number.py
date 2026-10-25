@@ -2,16 +2,15 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.accounts.models import User
-from apps.departments.models import Faculty, Department
+from apps.departments.models import Department
 from apps.programs.models import Program
 from apps.students.models import Student
 
 
 class StudentRegistrationNumberTests(TestCase):
     def setUp(self):
-        self.faculty = Faculty.objects.create(name="Test Faculty", code="TF")
         self.department = Department.objects.create(
-            faculty=self.faculty, name="Computer Science", code="CS"
+            name="Computer Science", code="CS"
         )
         self.program = Program.objects.create(
             department=self.department,

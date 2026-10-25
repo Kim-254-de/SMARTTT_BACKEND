@@ -455,7 +455,7 @@ def find_staff(staff_number: str) -> dict | None:
 
     account = (
         User.objects.filter(role=User.Role.LECTURER, university_id__iexact=number, is_active=True)
-        .select_related("lecturer_profile__department__faculty")
+        .select_related("lecturer_profile__department")
         .first()
     )
     lecturer = getattr(account, "lecturer_profile", None) if account else None
@@ -466,7 +466,6 @@ def find_staff(staff_number: str) -> dict | None:
         "full_name": (account.get_full_name().strip() if account else "") or listed.name_hint.strip() or None,
         "email": ((account.email or "").strip().lower() if account else "") or None,
         "department": department.name if department else None,
-        "faculty": department.faculty.name if department and department.faculty_id else None,
         "title": ((lecturer.rank or "").strip() or None) if lecturer else None,
         "has_account": account is not None,
         "is_active": True,
@@ -476,6 +475,21 @@ def find_staff(staff_number: str) -> dict | None:
 # ---------------------------------------------------------------------------
 # Sign-in, for Smart Attendance: one account, the SMARTTT one
 # ---------------------------------------------------------------------------
+
+
+def is_console_admin(user: User) -> bool:
+    """
+    Whether this account administers the platform from the unified admin
+    console (the Smart Attendance admin portal): an active staff account
+    (is_staff, as SMARTTT's own admin pages require) that is not a student's
+    or lecturer's. One account has one role there, and a teaching account
+    keeps the lecturer portal.
+    """
+    return bool(
+        user.is_active
+        and user.is_staff
+        and user.role not in (User.Role.STUDENT, User.Role.LECTURER)
+    )
 
 
 def authenticate_account(identifier: str, password: str) -> dict | None:
@@ -516,6 +530,7 @@ def authenticate_account(identifier: str, password: str) -> dict | None:
             "university_id": number,
             "email": (user.email or "").strip().lower() or None,
             "full_name": user.get_full_name().strip() or None,
+            "is_admin": is_console_admin(user),
         },
         "student": find_student(number) if user.role == User.Role.STUDENT and number else None,
         "staff": find_staff(number) if user.role == User.Role.LECTURER and number else None,
