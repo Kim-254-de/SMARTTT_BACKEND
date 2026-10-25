@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from .directory_views import AttendanceDepartmentsView
+from .directory_views import AttendanceDepartmentView, AttendanceDepartmentsView
 from .generator_views import GeneratorPublicationView, GeneratorPublishView
 
 from .views import (
@@ -41,6 +41,11 @@ urlpatterns = [
         "attendance/departments/",
         AttendanceDepartmentsView.as_view(),
         name="integrations-attendance-departments",
+    ),
+    path(
+        "attendance/departments/<int:pk>/",
+        AttendanceDepartmentView.as_view(),
+        name="integrations-attendance-department",
     ),
     # The Timetable Generator publishes approved timetables (generator_publish.py).
     path("generator/publish/", GeneratorPublishView.as_view(), name="integrations-generator-publish"),

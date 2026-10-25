@@ -126,3 +126,50 @@ class DirectoryTests(APITestCase):
     def test_a_malformed_code_is_refused(self):
         res = self._post(self.DEPARTMENTS, {"name": "Physics", "code": "<script>"})
         self.assertEqual((res.status_code, res.data["code"]), (400, "bad_code"))
+
+    def _patch(self, department_id, body, key=KEY):
+        url = reverse("integrations-attendance-department", kwargs={"pk": department_id})
+        return self.client.patch(url, body, format="json", **({"HTTP_X_API_KEY": key} if key else {}))
+
+    def test_an_edit_requires_the_api_key(self):
+        department = Department.objects.create(name="Physics", code="PHY")
+        self.assertEqual(self._patch(department.id, {"name": "Physics"}, key=None).status_code, 403)
+        self.assertEqual(self._patch(department.id, {"name": "Physics"}, key="wrong").status_code, 403)
+
+    def test_the_name_and_code_are_corrected(self):
+        department = Department.objects.create(name="Computr Science", code="DCMP")
+        res = self._patch(department.id, {"name": " Computer  Science", "code": "dcomp"})
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data, {"id": department.id, "name": "Computer Science", "code": "DCOMP", "status": "active"})
+        department.refresh_from_db()
+        self.assertEqual((department.name, department.code), ("Computer Science", "DCOMP"))
+
+    def test_only_what_is_sent_changes(self):
+        department = Department.objects.create(name="Physics", code="PHY")
+        res = self._patch(department.id, {"code": "DPHY"})
+        self.assertEqual((res.status_code, res.data["name"], res.data["code"]), (200, "Physics", "DPHY"))
+
+    def test_a_department_may_keep_or_recase_its_own_name_and_code(self):
+        department = Department.objects.create(name="physics", code="PHY")
+        res = self._patch(department.id, {"name": "Physics", "code": "phy"})
+        self.assertEqual((res.status_code, res.data["name"], res.data["code"]), (200, "Physics", "PHY"))
+
+    def test_another_departments_name_or_code_is_refused(self):
+        physics = Department.objects.create(name="Physics", code="PHY")
+        chemistry = Department.objects.create(name="Chemistry", code="CHEM")
+        res = self._patch(chemistry.id, {"name": "PHYSICS"})
+        self.assertEqual(res.status_code, 409)
+        self.assertEqual(res.data, {"detail": "That name is already in use.", "code": "name_taken", "id": physics.id})
+        res = self._patch(chemistry.id, {"code": "phy"})
+        self.assertEqual((res.status_code, res.data["code"]), (409, "code_taken"))
+        chemistry.refresh_from_db()
+        self.assertEqual((chemistry.name, chemistry.code), ("Chemistry", "CHEM"))
+
+    def test_a_blank_name_or_malformed_code_is_refused(self):
+        department = Department.objects.create(name="Physics", code="PHY")
+        self.assertEqual(self._patch(department.id, {"name": "  "}).status_code, 400)
+        res = self._patch(department.id, {"code": ""})
+        self.assertEqual((res.status_code, res.data["code"]), (400, "bad_code"))
+
+    def test_an_unknown_department_is_404(self):
+        self.assertEqual(self._patch(999999, {"name": "Physics"}).status_code, 404)
