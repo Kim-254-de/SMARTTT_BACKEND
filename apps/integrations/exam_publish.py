@@ -101,7 +101,9 @@ class _Paper(serializers.Serializer):
     end_time = serializers.TimeField(format="%H:%M", input_formats=["%H:%M"])
     examiner_staff_number = serializers.CharField(max_length=64, allow_null=True, allow_blank=True, required=False)
     sitting = serializers.ChoiceField(choices=["regular", "odel"], required=False, default="regular")
-    seating = _Seating(many=True, allow_empty=False)
+    # Empty for a paper nobody is known to sit yet (e.g. part-time students who never synced): it has a
+    # date and session, and its room is to be announced.
+    seating = _Seating(many=True, allow_empty=True)
 
 
 class _Room(serializers.Serializer):
@@ -290,7 +292,7 @@ def _check(term: AcademicTerm, data: dict, rooms: dict[str, Room]) -> None:
         mains = [s for s in p["seating"] if s["role"] == ExamSeating.Role.MAIN]
         main_staff = {s["invigilator_staff_number"].strip().upper() for s in mains}
         main_rooms = {_code(s["room_code"]) for s in mains}
-        if len(main_staff) != 1 or len(main_rooms) != 1:
+        if p["seating"] and (len(main_staff) != 1 or len(main_rooms) != 1):
             problems.append(f"{label} needs exactly one main invigilator, in one room.")
         for s in p["seating"]:
             staff = s["invigilator_staff_number"].strip().upper()

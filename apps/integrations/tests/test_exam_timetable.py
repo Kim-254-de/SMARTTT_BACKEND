@@ -87,7 +87,8 @@ class ExamCase(APITestCase):
             "end_time": end,
             "examiner_staff_number": "STF/0001",
             "seating": seating
-            or [
+            if seating is not None
+            else [
                 {"room_code": "STB 1", "class_rows": [self.ROW], "part": 1, "parts": 2, "students": 2,
                  "invigilator_staff_number": "STF/0001", "role": "main"},
                 {"room_code": "STB 2", "class_rows": [self.ROW], "part": 2, "parts": 2, "students": 2,
@@ -211,6 +212,16 @@ class StudentAndLecturerTests(ExamCase):
         self.publish(self.payload([self.paper(seating=seating)]))
         self.client.force_authenticate(self.students[1].user)  # CS/0001/26
         self.assertEqual(self.client.get("/api/v1/exams/my/").data["papers"][0]["room"], "STB 2")
+
+    def test_a_paper_nobody_is_known_to_sit_is_published_with_its_room_to_be_announced(self):
+        nobody = self.paper(key="p-100", start="11:30", end="13:30", seating=[], unit_codes=["MATH 100"], title="Basic Maths")
+        self.assertEqual(self.publish(self.payload([self.paper(), nobody])).status_code, 201)
+        stored = ExamPublication.objects.get().papers.get(key="p-100")
+        self.assertEqual(stored.seatings.count(), 0)
+        part_timer = self._student("CS/0400/24", "pt@students.tharaka.ac.ke", year=3, units=("MATH 100",))
+        self.client.force_authenticate(part_timer.user)
+        [paper] = self.client.get("/api/v1/exams/my/").data["papers"]
+        self.assertEqual((paper["codes"], paper["start_time"], paper["room"], paper["room_confirmed"]), ("MATH 100", "11:30", None, False))
 
     def test_only_synced_units_show(self):
         self.publish(self.payload())
