@@ -3,6 +3,7 @@ from django.urls import include, path
 from .directory_views import AttendanceDepartmentView, AttendanceDepartmentsView
 from .exam_views import ExamCloseView, ExamModeView, ExamPublishView, ExamSwitchView
 from .generator_views import GeneratorPublicationView, GeneratorPublishView
+from .unit_enrolment import AttendanceUnitEnrolmentView, GeneratorRoomsView
 
 from .views import (
     AttendanceAuthenticateView,
@@ -60,6 +61,9 @@ urlpatterns = [
     path("generator/exam-mode/", ExamModeView.as_view(), name="integrations-generator-exam-mode"),
     path("generator/exam-switch/", ExamSwitchView.as_view(), name="integrations-generator-exam-switch"),
     path("generator/exam-close/", ExamCloseView.as_view(), name="integrations-generator-exam-close"),
+    # How many students synced each unit, by class row, for exam papers; the rooms the admin uploaded (unit_enrolment.py).
+    path("attendance/unit-enrolment/", AttendanceUnitEnrolmentView.as_view(), name="integrations-attendance-unit-enrolment"),
+    path("generator/rooms/", GeneratorRoomsView.as_view(), name="integrations-generator-rooms"),
     # SMARTTT's admin functions for the unified admin console (acting_admin.py).
     path("admin/", include("apps.integrations.admin_urls")),
 ]
