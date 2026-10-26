@@ -204,6 +204,23 @@ def generate_for_user(user) -> dict:
             },
         }
 
+    # In exam mode the teaching timetable is hidden (not deleted): the app shows
+    # only the exam timetable (GET /api/v1/exams/my/) until the period closes.
+    if term.in_exam_mode:
+        return {
+            "term": str(term),
+            "mode": term.mode,
+            "units": [],
+            "timetable": {day: [] for day in DAY_ORDER},
+            "conflicts": [],
+            "summary": {
+                "unit_count": 0,
+                "session_count": 0,
+                "has_conflicts": False,
+                "message": "Exams are on: see your exam timetable.",
+            },
+        }
+
     # ── 2. Student's registered units this term ────────────────────────────────
     student_units = (
         StudentUnit.objects.select_related("unit", "unit__department")
@@ -230,6 +247,7 @@ def generate_for_user(user) -> dict:
     if not unit_ids:
         return {
             "term": str(term),
+            "mode": term.mode,
             "units": [],
             "timetable": {day: [] for day in DAY_ORDER},
             "conflicts": [],
@@ -271,6 +289,7 @@ def generate_for_user(user) -> dict:
 
     return {
         "term": str(term),
+        "mode": term.mode,
         "units": unit_data,
         "timetable": grouped,
         "conflicts": conflicts,

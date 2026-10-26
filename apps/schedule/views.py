@@ -2,7 +2,6 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .exams import exams_for_user
 from .services import generate_for_user, get_matching_slots
 from datetime import datetime, timedelta
 
@@ -33,16 +32,6 @@ class MyScheduleView(APIView):
     def get(self, request):
         payload = generate_for_user(request.user)
         return Response(payload)
-
-class MyExamsView(APIView):
-    """
-    GET /api/v1/schedule/exams/me/
-    The exam timetable of the units the student synced (see exams.py).
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        return Response(exams_for_user(request.user))
 
 #iCalendar feed view for the authenticated user
 class CalendarTokenView(APIView):
@@ -96,6 +85,8 @@ class MyCalendarFeedView(APIView):
         term = AcademicTerm.objects.filter(is_current=True).first()
         if not term:
             return HttpResponse('No current term', status=404)
+        # In exam mode the teaching timetable is hidden, here as in the app.
+        hide_teaching = term.in_exam_mode
 
         cal = Calendar()
         cal.add('prodid', '-//Smart TT//Tharaka University//EN')
@@ -104,7 +95,9 @@ class MyCalendarFeedView(APIView):
         cal.add('x-wr-timezone', 'Africa/Nairobi')
 
         # Student timetable
-        if user.role == 'student':
+        if hide_teaching:
+            slots = []
+        elif user.role == 'student':
             unit_ids = (
                 StudentUnit.objects.filter(user=user, term=term)
                 .values_list('unit_id', flat=True)

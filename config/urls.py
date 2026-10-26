@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.contrib import admin
+from apps.schedule.exam_views import CurrentTermView
 from django.urls import include, path, re_path
 from django.views.static import serve
 
@@ -16,6 +17,8 @@ urlpatterns = [
     path("api/v1/timetable/", include("apps.timetable.urls")),
     path("api/v1/courses/", include("apps.courses.urls")),
     path("api/v1/schedule/", include("apps.schedule.urls")),
+    path("api/v1/exams/", include("apps.schedule.exam_urls")),
+    path("api/v1/terms/current/", CurrentTermView.as_view(), name="current-term"),
     path("api/v1/notifications/", include("apps.notifications.urls")),
     path("api/v1/integrations/", include("apps.integrations.urls")),
     # No Nginx in front on Railway, so Django serves uploads from the volume

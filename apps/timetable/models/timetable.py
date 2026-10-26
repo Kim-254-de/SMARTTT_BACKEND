@@ -1,14 +1,35 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from apps.common.models import BaseModel
 
 
 class AcademicTerm(BaseModel):
+    class Mode(models.TextChoices):
+        TEACHING = "teaching", "Teaching"
+        EXAMS = "exams", "Exams"
+
     academic_year = models.CharField(max_length=20)
-    semester = models.PositiveSmallIntegerField()
+    # Calendar terms 1-3; May-August is semester 3.
+    semester = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(3)])
     start_date = models.DateField()
     end_date = models.DateField()
     is_current = models.BooleanField(default=False)
+    # Teaching or exams: in exam mode the app shows only the exam timetable and
+    # the teaching timetable is hidden (not deleted). The Director schedules the
+    # switch and the close from the Timetable Generator (apps/integrations/exam_mode.py);
+    # `apply_exam_mode` flips the mode when the time passes.
+    mode = models.CharField(max_length=10, choices=Mode.choices, default=Mode.TEACHING)
+    exam_switch_at = models.DateTimeField(null=True, blank=True)
+    switched_at = models.DateTimeField(null=True, blank=True)
+    switched_by = models.CharField(max_length=255, blank=True, default="")
+    exam_close_at = models.DateTimeField(null=True, blank=True)
+    exam_closed_at = models.DateTimeField(null=True, blank=True)
+    closed_by = models.CharField(max_length=255, blank=True, default="")
+
+    @property
+    def in_exam_mode(self) -> bool:
+        return self.mode == self.Mode.EXAMS
 
     class Meta:
         unique_together = ("academic_year", "semester")

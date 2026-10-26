@@ -145,6 +145,9 @@ GENERATOR_API_KEY = os.getenv("GENERATOR_API_KEY", "")
 # When set (with ATTENDANCE_API_KEY), a rescheduled class is pushed there at once
 # (apps/integrations/attendance_push.py). Unset = no push; it still catches up on its own.
 ATTENDANCE_BASE_URL = os.getenv("ATTENDANCE_BASE_URL", "")
+# Exam sessions (one per paper per room) and the term's teaching/exams mode, pushed the same way.
+ATTENDANCE_EXAM_SESSIONS_PATH = os.getenv("ATTENDANCE_EXAM_SESSIONS_PATH", "/api/v1/integrations/smarttt/exam-sessions")
+ATTENDANCE_TERM_MODE_PATH = os.getenv("ATTENDANCE_TERM_MODE_PATH", "/api/v1/integrations/smarttt/term-mode")
 ATTENDANCE_TIMETABLE_CHANGES_PATH = os.getenv(
     "ATTENDANCE_TIMETABLE_CHANGES_PATH", "/api/v1/integrations/smarttt/timetable-changes"
 )

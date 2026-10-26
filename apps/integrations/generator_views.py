@@ -1,7 +1,7 @@
 """
 Endpoints for the Timetable Generator (X-API-Key = GENERATOR_API_KEY): it
 publishes each approved timetable here as the term's master timetable
-(generator_publish.py), and each approved exam timetable (generator_exams.py).
+(generator_publish.py).
 """
 import uuid
 
@@ -10,7 +10,6 @@ from rest_framework.views import APIView
 
 from apps.timetable.models import TimetablePublication
 
-from .generator_exams import ExamPublishSerializer, publish_exams
 from .generator_publish import PublishRefused, PublishSerializer, publish
 from .permissions import HasGeneratorApiKey
 
@@ -60,31 +59,3 @@ class GeneratorPublicationView(APIView):
         return Response(
             {**publication.result, "published_by": publication.published_by, "published_at": publication.created_at}
         )
-
-
-class GeneratorExamPublishView(APIView):
-    """
-    POST /api/v1/integrations/generator/exams/publish/
-
-    201 -> published now; 200 -> this exam version was already published with
-    the same papers (the stored result). 400 a malformed payload; 404 an
-    unknown term_id; 409 stale_base | version_taken; 422
-    invalid_exam_timetable | term_mismatch | term_dates_required.
-    Every refusal is {"code", "detail", ...} and writes nothing.
-    """
-
-    authentication_classes: list = []
-    permission_classes = [HasGeneratorApiKey]
-
-    def post(self, request):
-        serializer = ExamPublishSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                {"code": "invalid_payload", "detail": "The exam timetable sent is not valid.", "errors": serializer.errors},
-                status=400,
-            )
-        try:
-            status, body = publish_exams(serializer.validated_data)
-        except PublishRefused as refused:
-            return Response(refused.body, status=refused.status)
-        return Response(body, status=status)
