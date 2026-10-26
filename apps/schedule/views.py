@@ -2,6 +2,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .exams import exams_for_user
 from .services import generate_for_user, get_matching_slots
 from datetime import datetime, timedelta
 
@@ -32,6 +33,16 @@ class MyScheduleView(APIView):
     def get(self, request):
         payload = generate_for_user(request.user)
         return Response(payload)
+
+class MyExamsView(APIView):
+    """
+    GET /api/v1/schedule/exams/me/
+    The exam timetable of the units the student synced (see exams.py).
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(exams_for_user(request.user))
 
 #iCalendar feed view for the authenticated user
 class CalendarTokenView(APIView):
