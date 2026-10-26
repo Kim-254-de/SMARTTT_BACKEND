@@ -1,7 +1,7 @@
 from django.urls import include, path
 
 from .directory_views import AttendanceDepartmentView, AttendanceDepartmentsView
-from .generator_views import GeneratorPublicationView, GeneratorPublishView
+from .generator_views import GeneratorExamPublishView, GeneratorPublicationView, GeneratorPublishView
 
 from .views import (
     AttendanceAuthenticateView,
@@ -54,6 +54,8 @@ urlpatterns = [
         GeneratorPublicationView.as_view(),
         name="integrations-generator-publication",
     ),
+    # ... and approved exam timetables (generator_exams.py).
+    path("generator/exams/publish/", GeneratorExamPublishView.as_view(), name="integrations-generator-exams-publish"),
     # SMARTTT's admin functions for the unified admin console (acting_admin.py).
     path("admin/", include("apps.integrations.admin_urls")),
 ]
