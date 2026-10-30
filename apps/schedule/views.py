@@ -85,6 +85,8 @@ class MyCalendarFeedView(APIView):
         term = AcademicTerm.objects.filter(is_current=True).first()
         if not term:
             return HttpResponse('No current term', status=404)
+        # In exam mode the teaching timetable is hidden, here as in the app.
+        hide_teaching = term.in_exam_mode
 
         cal = Calendar()
         cal.add('prodid', '-//Smart TT//Tharaka University//EN')
@@ -93,7 +95,9 @@ class MyCalendarFeedView(APIView):
         cal.add('x-wr-timezone', 'Africa/Nairobi')
 
         # Student timetable
-        if user.role == 'student':
+        if hide_teaching:
+            slots = []
+        elif user.role == 'student':
             unit_ids = (
                 StudentUnit.objects.filter(user=user, term=term)
                 .values_list('unit_id', flat=True)

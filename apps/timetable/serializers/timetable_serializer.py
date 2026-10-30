@@ -31,10 +31,15 @@ class AcademicTermSerializer(serializers.ModelSerializer):
             "end_date",
             "is_current",
             "is_active",
+            "mode",
+            "exam_switch_at",
+            "switched_at",
+            "exam_closed_at",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        # The mode is set by the Director's switch from the Generator (apps/integrations/exam_mode.py).
+        read_only_fields = ("id", "mode", "exam_switch_at", "switched_at", "exam_closed_at", "created_at", "updated_at")
     
     def get_is_active(self, obj) -> bool:
         """Check if term is currently active."""

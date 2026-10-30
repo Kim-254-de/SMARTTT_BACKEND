@@ -40,7 +40,8 @@ services:
     runtime: python
     schedule: "* * * * *"
     buildCommand: pip install -r requirements.txt
-    startCommand: python manage.py send_class_reminders
+    # Every minute: scheduled switches to exams and closes first, then class (or exam) reminders.
+    startCommand: python manage.py apply_exam_mode && python manage.py send_class_reminders
     envVars:
       - key: DJANGO_SETTINGS_MODULE
         value: config.settings.production

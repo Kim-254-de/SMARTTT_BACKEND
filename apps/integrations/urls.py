@@ -1,7 +1,9 @@
 from django.urls import include, path
 
-from .directory_views import AttendanceDepartmentsView
+from .directory_views import AttendanceDepartmentView, AttendanceDepartmentsView
+from .exam_views import ExamCloseView, ExamModeView, ExamPublishView, ExamSwitchView
 from .generator_views import GeneratorPublicationView, GeneratorPublishView
+from .unit_enrolment import AttendanceUnitEnrolmentView, GeneratorRoomsView
 
 from .views import (
     AttendanceAuthenticateView,
@@ -42,6 +44,11 @@ urlpatterns = [
         AttendanceDepartmentsView.as_view(),
         name="integrations-attendance-departments",
     ),
+    path(
+        "attendance/departments/<int:pk>/",
+        AttendanceDepartmentView.as_view(),
+        name="integrations-attendance-department",
+    ),
     # The Timetable Generator publishes approved timetables (generator_publish.py).
     path("generator/publish/", GeneratorPublishView.as_view(), name="integrations-generator-publish"),
     path(
@@ -49,6 +56,14 @@ urlpatterns = [
         GeneratorPublicationView.as_view(),
         name="integrations-generator-publication",
     ),
+    # The exam timetable and switching the term to exams (exam_publish.py, exam_mode.py).
+    path("generator/exam-publish/", ExamPublishView.as_view(), name="integrations-generator-exam-publish"),
+    path("generator/exam-mode/", ExamModeView.as_view(), name="integrations-generator-exam-mode"),
+    path("generator/exam-switch/", ExamSwitchView.as_view(), name="integrations-generator-exam-switch"),
+    path("generator/exam-close/", ExamCloseView.as_view(), name="integrations-generator-exam-close"),
+    # How many students synced each unit, by class row, for exam papers; the rooms the admin uploaded (unit_enrolment.py).
+    path("attendance/unit-enrolment/", AttendanceUnitEnrolmentView.as_view(), name="integrations-attendance-unit-enrolment"),
+    path("generator/rooms/", GeneratorRoomsView.as_view(), name="integrations-generator-rooms"),
     # SMARTTT's admin functions for the unified admin console (acting_admin.py).
     path("admin/", include("apps.integrations.admin_urls")),
 ]
