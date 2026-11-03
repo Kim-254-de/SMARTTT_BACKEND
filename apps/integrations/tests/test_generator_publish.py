@@ -110,6 +110,7 @@ class GeneratorPublishTests(PublishCase):
         slot = TimetableSlot.objects.get(term=term, generator_key="COSC103-GRA-1|BSCCOMPSCIY1S1")
         self.assertEqual((slot.unit, slot.program, slot.room), (self.cosc, self.bsc, self.hall))
         self.assertEqual((slot.day_of_week, slot.start_time, slot.end_time, slot.class_group), ("tue", time(10), time(12), "GR_A"))
+        self.assertEqual(slot.study_semester, 1)
         edfo = TimetableSlot.objects.get(term=term, generator_key="EDFO111-1|BEDARTSY1S1")
         self.assertEqual((edfo.class_group, edfo.unit.department, edfo.program.department), ("MAIN", self.edu, self.edu))
         self.assertTrue(Room.objects.get(code="NEW 9").capacity_confirmed)

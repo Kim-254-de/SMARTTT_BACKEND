@@ -460,6 +460,7 @@ def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027
             "academic_year": academic_year,
             "semester": semester,
             "year_of_study": year_of_study,
+            "study_semester": semester,
             "program_code": program_code[:64],
             "unit_code": unit_code[:20],
             "class_group": class_group,

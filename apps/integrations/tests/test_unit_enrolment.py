@@ -96,6 +96,66 @@ class UnitEnrolmentTests(APITestCase):
         unit = self.post(["COSC 130"]).data["units"]["COSC 130"]
         self.assertEqual(unit["lecturers"], [{"staff_number": "STF/0001", "name": "Jane L"}])
 
+    def slot(self, unit, program=None, year=2, stream="", day="mon", study_semester=None, term=None):
+        room, _ = Room.objects.get_or_create(code="LH1", defaults={"name": "LH1", "building": "Main", "capacity": 100})
+        TimetableSlot.objects.create(
+            term=term or self.term, unit=unit, program=program or self.bsc, year_of_study=year, stream=stream,
+            study_semester=study_semester, room=room, day_of_week=day, start_time=time(8), end_time=time(10),
+        )
+
+    @staticmethod
+    def classes(unit):
+        return [(r["program"], r["year_of_study"], r["study_semester"], r["stream"], r["students"]) for r in unit["rows"]]
+
+    def test_the_master_timetable_names_the_classes_when_nobody_synced(self):
+        bed = Program.objects.create(department=self.cs, code="BED.SCI", name="BEd Science")
+        self.slot(self.math, study_semester=2)
+        self.slot(self.math, day="wed", study_semester=2)  # another meeting of one class: still one row
+        self.slot(self.math, program=bed, year=3, stream="1", study_semester=1)
+        self.slot(self.math, program=bed, year=3, stream="2", study_semester=1)
+        self.slot(self.cosc, program=bed, year=1, term=self.old)  # another term: not this one's class
+        body = self.post(["MATH 241", "COSC 130"]).data
+        self.assertEqual(body["unknown"], [])
+        self.assertEqual(body["units"]["COSC 130"]["rows"], [])
+        unit = body["units"]["MATH 241"]
+        self.assertEqual(unit["students"], 0)
+        self.assertEqual(
+            self.classes(unit), [("BED.SCI", 3, 1, "1", 0), ("BED.SCI", 3, 1, "2", 0), ("BSC.CS", 2, 2, "", 0)]
+        )
+        self.assertEqual({r["sitting"] for r in unit["rows"]}, {"regular"})
+
+    def test_a_synced_class_on_the_timetable_is_one_row_with_its_students(self):
+        self.slot(self.math, study_semester=1)
+        self.sync(self.student(), self.math)
+        self.sync(self.student(), self.math)
+        unit = self.post(["MATH 241"]).data["units"]["MATH 241"]
+        self.assertEqual(self.classes(unit), [("BSC.CS", 2, 1, "", 2)])
+
+    def test_synced_students_of_a_class_not_on_the_timetable_still_count(self):
+        self.slot(self.math, year=3, study_semester=1)
+        self.sync(self.student(year=2), self.math)
+        unit = self.post(["MATH 241"]).data["units"]["MATH 241"]
+        self.assertEqual(self.classes(unit), [("BSC.CS", 2, 1, "", 1), ("BSC.CS", 3, 1, "", 0)])
+
+    def test_a_slot_that_doesnt_say_takes_the_programme_years_usual_semester(self):
+        self.slot(self.math)
+        for _ in range(2):
+            student = self.student()
+            Student.objects.filter(user=student).update(current_semester=2)
+        self.student()
+        unit = self.post(["MATH 241"]).data["units"]["MATH 241"]
+        self.assertEqual(self.classes(unit), [("BSC.CS", 2, 2, "", 0)])
+        self.slot(self.cosc, year=4)  # nobody to go by
+        self.assertEqual(self.classes(self.post(["COSC 130"]).data["units"]["COSC 130"]), [("BSC.CS", 4, 1, "", 0)])
+
+    def test_duplicate_programmes_are_one_class(self):
+        other = Department.objects.create(name="School of Computing", code="SOC")
+        dup = Program.objects.create(department=other, code="BSC.CS2", name="BSC computer  science")
+        self.slot(self.math, program=dup, study_semester=1)
+        self.sync(self.student(), self.math)
+        unit = self.post(["MATH 241"]).data["units"]["MATH 241"]
+        self.assertEqual(self.classes(unit), [("BSC.CS", 2, 1, "", 1)])
+
     def test_the_generator_reads_the_admins_rooms(self):
         Room.objects.create(code="UTC 1", name="UTC 1", building="UTC", capacity=300)
         Room.objects.create(code="LAB 2", name="Lab", building="Main", capacity=40, room_type=Room.Type.LAB)

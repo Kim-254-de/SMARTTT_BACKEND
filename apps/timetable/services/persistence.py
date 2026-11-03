@@ -202,6 +202,7 @@ class TimetablePersistenceService:
                     unit=unit,
                     program=program,
                     year_of_study=year_of_study_val,
+                    study_semester=row.get("study_semester") or None,
                     lecturer=lecturer,
                     room=room,
                     day_of_week=day_val,

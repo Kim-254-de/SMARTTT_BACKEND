@@ -88,6 +88,13 @@ class TimetableSlot(BaseModel):
         blank=True,
     )
     year_of_study = models.PositiveSmallIntegerField(default=1)
+    study_semester = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text="The cohort's semester of study as on the master timetable, e.g. "
+                  "the '2' in 'BCOM Y4S2'. Blank on slots saved before this existed "
+                  "or from a source that doesn't say.",
+    )
     lecturer = models.ForeignKey(
         "lecturers.Lecturer",
         on_delete=models.PROTECT,
