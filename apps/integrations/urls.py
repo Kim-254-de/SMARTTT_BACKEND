@@ -2,7 +2,7 @@ from django.urls import include, path
 
 from .directory_views import AttendanceDepartmentView, AttendanceDepartmentsView
 from .exam_views import ExamCloseView, ExamModeView, ExamPublishView, ExamSwitchView
-from .generator_views import GeneratorPublicationView, GeneratorPublishView
+from .generator_views import GeneratorPublicationView, GeneratorPublishView, GeneratorSetCurrentView, GeneratorTermsView
 from .unit_enrolment import AttendanceUnitEnrolmentView, GeneratorRoomsView
 
 from .views import (
@@ -57,6 +57,8 @@ urlpatterns = [
         name="integrations-generator-publication",
     ),
     # The exam timetable and switching the term to exams (exam_publish.py, exam_mode.py).
+    path("generator/terms/", GeneratorTermsView.as_view(), name="integrations-generator-terms"),
+    path("generator/set-current/", GeneratorSetCurrentView.as_view(), name="integrations-generator-set-current"),
     path("generator/exam-publish/", ExamPublishView.as_view(), name="integrations-generator-exam-publish"),
     path("generator/exam-mode/", ExamModeView.as_view(), name="integrations-generator-exam-mode"),
     path("generator/exam-switch/", ExamSwitchView.as_view(), name="integrations-generator-exam-switch"),
