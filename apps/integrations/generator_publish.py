@@ -181,6 +181,7 @@ class _Wanted:
     unit: Unit
     program: Program
     year_of_study: int
+    study_semester: int | None
     room: Room
     day_of_week: str
     start_time: time
@@ -435,6 +436,7 @@ def _wanted_slots(sessions: list[dict], created: _Created) -> dict[str, _Wanted]
                 unit=unit,
                 program=program_for(row),
                 year_of_study=row["year_of_study"],
+                study_semester=row.get("study_semester"),
                 room=room,
                 day_of_week=s["day_of_week"].lower(),
                 start_time=s["start_time"],
@@ -451,7 +453,7 @@ def _wanted_slots(sessions: list[dict], created: _Created) -> dict[str, _Wanted]
     return wanted
 
 
-SLOT_FIELDS = ("unit", "program", "year_of_study", "room", "day_of_week", "start_time", "end_time", "class_group", "stream")
+SLOT_FIELDS = ("unit", "program", "year_of_study", "study_semester", "room", "day_of_week", "start_time", "end_time", "class_group", "stream")
 WHERE_FIELDS = ("room", "day_of_week", "start_time", "end_time")
 
 
