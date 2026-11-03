@@ -44,6 +44,12 @@ class RoomViewSet(ModelViewSet):
         result["summary"] = capacity_summary()
         return Response(result, status=200)
 
+    @action(detail=False, methods=["get"], url_path="everything", permission_classes=[IsAdminUser])
+    def everything(self, request):
+        """Every venue, unpaged, for the admin's table (the placeholder TBA room left out)."""
+        rooms = Room.objects.exclude(code="TBA").order_by("building", "code")
+        return Response({"rooms": RoomSerializer(rooms, many=True).data})
+
     @action(detail=False, methods=["get"], url_path="capacity-summary", permission_classes=[IsAdminUser])
     def capacity_summary(self, request):
         """GET /api/v1/rooms/rooms/capacity-summary/ — rooms still missing a real capacity."""

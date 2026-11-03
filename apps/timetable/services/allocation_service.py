@@ -105,12 +105,12 @@ def plan_for_year(academic_year: str, documents: list[AllocationDocument], extra
             unit_code=s["unit__code"] or "",
             program_code=s["program__code"] or "",
             year_of_study=s["year_of_study"],
-            semester=s["term__semester"],
+            semester=s["study_semester"] or s["term__semester"],
             class_group=s["class_group"] or "MAIN",
             stream=s["stream"] or "",
         )
         for s in year_slots(academic_year).values(
-            "id", "unit__code", "program__code", "year_of_study", "term__semester", "class_group", "stream"
+            "id", "unit__code", "program__code", "year_of_study", "study_semester", "term__semester", "class_group", "stream"
         )
     ]
     return plan_assignments(rows, slot_refs), {s.id: s for s in slot_refs}

@@ -26,6 +26,14 @@ class Room(BaseModel):
     capacity_confirmed = models.BooleanField(default=False)
     room_type = models.CharField(max_length=30, choices=Type.choices, default=Type.LECTURE_HALL)
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.ACTIVE)
+    for_exams = models.BooleanField(
+        default=True,
+        help_text="Whether exams can be sat here. The Director can overrule this in the Timetable Generator.",
+    )
+    health_unit = models.BooleanField(
+        default=False,
+        help_text="In the health unit: health and nursing papers sit only in these rooms.",
+    )
     description = models.TextField(blank=True)
     facilities = models.TextField(blank=True)
 

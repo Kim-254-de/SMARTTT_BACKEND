@@ -36,7 +36,8 @@ are who teaches it on the term's timetable.
 GET /api/v1/integrations/generator/rooms/   (X-API-Key = GENERATOR_API_KEY)
 
 200 -> {"rooms": [{"code": "LH1", "name": "...", "building": "...", "capacity": 120,
-                   "room_type": "lecture_hall", "status": "active"}]}
+                   "room_type": "lecture_hall", "status": "active",
+                   "for_exams": true, "health_unit": false}]}
 
 Every room the admin uploaded, with its capacity: the Generator seats exams in them.
 """
@@ -227,6 +228,8 @@ class GeneratorRoomsView(APIView):
                         "capacity": r.capacity,
                         "room_type": r.room_type,
                         "status": r.status,
+                        "for_exams": r.for_exams,
+                        "health_unit": r.health_unit,
                     }
                     for r in rooms
                 ]

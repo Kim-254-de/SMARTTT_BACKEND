@@ -278,7 +278,15 @@ class TimetableUploadAPIView(APIView):
         academic_year = request.data.get("academic_year") or resolve_academic_year() or "2026/2027"
 
         # Spawn daemon worker thread
-        dispatch_async_upload(upload_batch, saved_file_path, academic_year=academic_year)
+        # The whole file goes in one term: the one asked for, else the current term's semester.
+        current = AcademicTerm.objects.filter(is_current=True, academic_year=academic_year).first()
+        try:
+            term_semester = int(request.data.get("semester") or 0)
+        except (TypeError, ValueError):
+            term_semester = 0
+        if term_semester not in (1, 2, 3):
+            term_semester = current.semester if current else 1
+        dispatch_async_upload(upload_batch, saved_file_path, academic_year=academic_year, term_semester=term_semester)
 
         return Response(
             {
