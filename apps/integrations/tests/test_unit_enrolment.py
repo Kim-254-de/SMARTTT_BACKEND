@@ -163,6 +163,13 @@ class UnitEnrolmentTests(APITestCase):
         unit = self.client.post(url, {"codes": ["MATH 241"]}, format="json", HTTP_X_API_KEY=GEN_KEY).data["units"]["MATH 241"]
         self.assertEqual(self.classes(unit), [("BSC.CS", 2, 1, "", 0)])
 
+    def test_the_generator_reads_programme_codes_duplicates_as_one(self):
+        other = Department.objects.create(name="School of Computing", code="SOC")
+        Program.objects.create(department=other, code="BSC.CS2", name="BSC computer  science")
+        url = reverse("integrations-generator-programs")
+        self.assertEqual(self.client.get(url, HTTP_X_API_KEY=ATT_KEY).status_code, 403)
+        self.assertEqual([p["code"] for p in self.client.get(url, HTTP_X_API_KEY=GEN_KEY).data["programs"]], ["BSC.CS"])
+
     def test_the_generator_reads_the_admins_rooms(self):
         Room.objects.create(code="UTC 1", name="UTC 1", building="UTC", capacity=300)
         Room.objects.create(code="LAB 2", name="Lab", building="Main", capacity=40, room_type=Room.Type.LAB)
