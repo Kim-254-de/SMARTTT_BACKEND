@@ -44,6 +44,35 @@ Use `B-` for items the backend should act on, and `F-` for items the frontend sh
 - **Done when:** the endpoints exist, and their response shapes (an example JSON each) are
   added below under "For the frontend", so the app screens can be built against them.
 
+### B-3 · High · Rooms can be reserved for health only: let the admin set up other reserved groups
+- **Raised:** 2026-11-03, frontend (Wayler)   **Status:** open
+- **Seen:** a room has one yes/no field for this, `health_unit`
+  (`apps/rooms/models/room.py:33`). It is merged in `apps/rooms/services/room_merge.py:45`,
+  and sent to the Generator in `apps/integrations/unit_enrolment.py:257`. There is nowhere to
+  say "these rooms belong to another course".
+  **Example to test against:** the university starts a new Bachelor of Engineering. Its papers
+  (codes starting `BENG`) must be sat only in the engineering workshops, W1 and W2, and no
+  other course's paper may be put in W1 or W2.
+- **What we ask for:** a **venue group** that a room can belong to, in place of the yes/no
+  `health_unit`. The admin creates groups and puts rooms in them; health becomes the first
+  group, and the migration moves every room with `health_unit = true` into it. The shape is
+  yours; one way:
+  ```
+  GET  /api/v1/integrations/admin/rooms/groups/  -> { "groups": [ { "id": 1, "code": "health", "name": "Health unit", "rooms": 6 } ] }
+  POST /api/v1/integrations/admin/rooms/groups/  { "name": "Engineering workshops" }  -> the group
+  PATCH /api/v1/integrations/admin/rooms/:id/    { "group": "engineering" }   (null takes it out)
+  rooms in lists and in the Generator's room data: "group": "health" | "engineering" | null
+  ```
+  Please keep `health_unit` in responses for one release (true when `group == "health"`), so
+  the Generator and the Attendance Venues page keep working while they switch over. Merging
+  rooms keeps the group of the room kept, and refuses to merge rooms from different groups.
+- **Why it matters:** without it, the Generator can't keep a new course's papers in its own
+  rooms (Timetable-Generator `GAPS.md` B-4), and the Venues page can only offer the health switch.
+- **Done when:** the example works end to end: W1 and W2 are in "Engineering workshops"; the
+  Generator receives `"group": "engineering"` for them; existing health rooms have
+  `"group": "health"` and `health_unit: true`; the shapes are written under "For the
+  frontend team" in Smart Attendance's `GAPS.md`.
+
 ### Checked and fine (2026-10-25)
 - Every path the Flutter app calls exists on `origin/main`.
 - Every SMARTTT path that the Attendance admin console proxies
