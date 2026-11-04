@@ -20,6 +20,7 @@ from apps.notifications.models import StudentNotification
 from apps.programs.models import Program
 from apps.rooms.models import Room
 from apps.students.models import Student
+from apps.timetable.services.exam_service import lecturer_duties
 from apps.timetable.models import AcademicTerm, ExamModeChange, ExamPublication
 from apps.units.models import Unit
 
@@ -173,6 +174,15 @@ class ExamPublishTests(ExamCase):
                          "exactly one main invigilator", "121 on", "STF/0003 invigilates in 2 rooms"):
             self.assertIn(expected, text)
         self.assertFalse(ExamPublication.objects.exists())
+
+    def test_one_invigilator_can_cover_several_papers_in_one_room(self):
+        one_room = [
+            {"room_code": "STB 1", "class_rows": [self.ROW], "students": 5, "invigilator_staff_number": "STF/0001", "role": "main"},
+        ]
+        res = self.publish(self.payload([self.paper("p-a", seating=copy.deepcopy(one_room)), self.paper("p-b", seating=copy.deepcopy(one_room))]))
+        self.assertEqual(res.status_code, 201, res.content)
+        duties = lecturer_duties("STF/0001", ExamPublication.objects.get())["duties"]
+        self.assertEqual(sorted(d["key"] for d in duties), ["p-a", "p-b"])
 
     def test_unknown_staff_numbers_and_rooms_are_named(self):
         seating = copy.deepcopy(self.paper()["seating"])
