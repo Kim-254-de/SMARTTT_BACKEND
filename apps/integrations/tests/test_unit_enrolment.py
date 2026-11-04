@@ -156,6 +156,13 @@ class UnitEnrolmentTests(APITestCase):
         unit = self.post(["MATH 241"]).data["units"]["MATH 241"]
         self.assertEqual(self.classes(unit), [("BSC.CS", 2, 1, "", 1)])
 
+    def test_the_generator_reads_the_same_classes_with_its_own_key(self):
+        self.slot(self.math, study_semester=1)
+        url = reverse("integrations-generator-unit-enrolment")
+        self.assertEqual(self.client.post(url, {"codes": ["MATH 241"]}, format="json", HTTP_X_API_KEY=ATT_KEY).status_code, 403)
+        unit = self.client.post(url, {"codes": ["MATH 241"]}, format="json", HTTP_X_API_KEY=GEN_KEY).data["units"]["MATH 241"]
+        self.assertEqual(self.classes(unit), [("BSC.CS", 2, 1, "", 0)])
+
     def test_the_generator_reads_the_admins_rooms(self):
         Room.objects.create(code="UTC 1", name="UTC 1", building="UTC", capacity=300)
         Room.objects.create(code="LAB 2", name="Lab", building="Main", capacity=40, room_type=Room.Type.LAB)

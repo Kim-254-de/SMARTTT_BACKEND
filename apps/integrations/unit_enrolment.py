@@ -212,6 +212,19 @@ class AttendanceUnitEnrolmentView(APIView):
         return Response(unit_enrolment(query.validated_data["codes"]))
 
 
+class GeneratorUnitEnrolmentView(APIView):
+    """POST generator/unit-enrolment/: the same answer, for the health and nursing papers the Director uploads."""
+
+    authentication_classes: list = []
+    permission_classes = [HasGeneratorApiKey]
+
+    def post(self, request):
+        query = _EnrolmentQuery(data=request.data)
+        if not query.is_valid():
+            return Response({"detail": "Send the unit codes as {\"codes\": [...]}.", "errors": query.errors}, status=400)
+        return Response(unit_enrolment(query.validated_data["codes"]))
+
+
 class GeneratorRoomsView(APIView):
     authentication_classes: list = []
     permission_classes = [HasGeneratorApiKey]
