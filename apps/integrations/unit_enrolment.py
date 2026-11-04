@@ -236,6 +236,17 @@ class GeneratorProgramsView(APIView):
         return Response({"programs": sorted(({"code": c, "name": n} for c, n in set(one_code.values())), key=lambda p: p["code"])})
 
 
+class AttendanceProgramsView(APIView):
+    """GET attendance/programs/: programme codes and names, to match the classes a department's moderation letter names."""
+
+    authentication_classes: list = []
+    permission_classes = [HasAttendanceApiKey]
+
+    def get(self, request):
+        one_code = _program_code_names()
+        return Response({"programs": sorted(({"code": c, "name": n} for c, n in set(one_code.values())), key=lambda p: p["code"])})
+
+
 class GeneratorRoomsView(APIView):
     authentication_classes: list = []
     permission_classes = [HasGeneratorApiKey]
