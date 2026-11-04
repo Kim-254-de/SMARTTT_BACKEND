@@ -27,6 +27,7 @@ class TimetableTransformService:
                 "program_code": str(row.get("program_code", "")).strip(),
                 "unit_code": str(row.get("unit_code", "")).strip(),
                 "year_of_study": int(row.get("year_of_study", 0)),
+                "study_semester": row.get("study_semester") or None,
                 "day_of_week": day_abbr,
                 "start_time": start_time,
                 "end_time": end_time,

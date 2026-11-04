@@ -79,6 +79,7 @@ from apps.departments.models import Department
 from apps.lecturers.models import Lecturer
 from apps.programs.models import Program
 from apps.rooms.models import Room
+from apps.rooms.services.room_merge import room_key
 from apps.timetable.models import AcademicTerm, TimetablePublication, TimetableSlot
 from apps.timetable.services.allocation_service import LecturerDirectory
 from apps.units.models import Unit
@@ -181,6 +182,7 @@ class _Wanted:
     unit: Unit
     program: Program
     year_of_study: int
+    study_semester: int | None
     room: Room
     day_of_week: str
     start_time: time
@@ -357,7 +359,7 @@ def _wanted_slots(sessions: list[dict], created: _Created) -> dict[str, _Wanted]
     units: dict[str, Unit] = {}
     rooms: dict[str, Room] = {}
     programs: dict[tuple[str, int | None], Program] = {}
-    rooms_by_code = {compact(r.code): r for r in Room.objects.all()}
+    rooms_by_code = {room_key(r.code): r for r in Room.objects.all()}
 
     def unit_for(s: dict) -> Unit:
         code = compact(s["unit_code"])
@@ -386,7 +388,7 @@ def _wanted_slots(sessions: list[dict], created: _Created) -> dict[str, _Wanted]
 
     def room_for(s: dict) -> Room:
         room = s["room"]
-        code = compact(room["code"])
+        code = room_key(room["code"])
         if code not in rooms:
             found = rooms_by_code.get(code)
             if found is None:
@@ -435,6 +437,7 @@ def _wanted_slots(sessions: list[dict], created: _Created) -> dict[str, _Wanted]
                 unit=unit,
                 program=program_for(row),
                 year_of_study=row["year_of_study"],
+                study_semester=row.get("study_semester"),
                 room=room,
                 day_of_week=s["day_of_week"].lower(),
                 start_time=s["start_time"],
@@ -451,7 +454,7 @@ def _wanted_slots(sessions: list[dict], created: _Created) -> dict[str, _Wanted]
     return wanted
 
 
-SLOT_FIELDS = ("unit", "program", "year_of_study", "room", "day_of_week", "start_time", "end_time", "class_group", "stream")
+SLOT_FIELDS = ("unit", "program", "year_of_study", "study_semester", "room", "day_of_week", "start_time", "end_time", "class_group", "stream")
 WHERE_FIELDS = ("room", "day_of_week", "start_time", "end_time")
 
 

@@ -390,7 +390,15 @@ def parse_pdf(path: str) -> ParseResult:
     return result
 
 
-def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027") -> list[dict]:
+def to_timetable_slot_dicts(
+    result: ParseResult, academic_year: str = "2026/2027", term_semester: int | None = None
+) -> list[dict]:
+    """
+    One dict per slot. `semester` is the term the slot goes in: `term_semester`
+    when given, so a whole file lands in one term; the cohort's own semester
+    ("Y4S2") is `study_semester`. With no term_semester (the seed commands) a
+    slot's term follows its cohort, as it used to.
+    """
     out = []
     for s in result.slots:
         program_code = s.cohort_label
@@ -458,8 +466,9 @@ def to_timetable_slot_dicts(result: ParseResult, academic_year: str = "2026/2027
 
         out.append({
             "academic_year": academic_year,
-            "semester": semester,
+            "semester": term_semester or semester,
             "year_of_study": year_of_study,
+            "study_semester": semester,
             "program_code": program_code[:64],
             "unit_code": unit_code[:20],
             "class_group": class_group,

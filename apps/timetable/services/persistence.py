@@ -7,6 +7,7 @@ from apps.programs.models import Program
 from apps.departments.models import Department
 from apps.lecturers.models import Lecturer
 from apps.rooms.models import Room
+from apps.rooms.services.room_merge import room_key
 from apps.timetable.models import AcademicTerm, TimetableSlot
 from apps.timetable.utils import TimetableLogger
 
@@ -95,24 +96,19 @@ class TimetablePersistenceService:
                 cache["unit"][u.code.lower()] = u
 
         # 5. Rooms
-        room_codes = {str(r["room_code"]).strip() for r in rows if r.get("room_code")}
-        existing_rooms = Room.objects.filter(code__in=room_codes)
-        for rm in existing_rooms:
-            cache["room"][rm.code.lower()] = rm
-
-        missing_r_codes = [c for c in room_codes if c.lower() not in cache["room"]]
-        if missing_r_codes:
-            new_rooms = [
-                Room(
-                    code=c[:20],
-                    name=c[:100],
-                    capacity=50,
-                )
-                for c in missing_r_codes
-            ]
+        # By room_key: "TC1" and "TC 1" are one room, so an upload never makes a twin of one.
+        for rm in Room.objects.all():
+            cache["room"][room_key(rm.code)] = rm
+        missing_rooms = {}
+        for r in rows:
+            code = str(r.get("room_code") or "").strip()
+            if code and room_key(code) not in cache["room"]:
+                missing_rooms.setdefault(room_key(code), code)
+        if missing_rooms:
+            new_rooms = [Room(code=c[:20], name=c[:100], capacity=50) for c in missing_rooms.values()]
             Room.objects.bulk_create(new_rooms, ignore_conflicts=True)
-            for rm in Room.objects.filter(code__in=missing_r_codes):
-                cache["room"][rm.code.lower()] = rm
+            for rm in Room.objects.filter(code__in=[c[:20] for c in missing_rooms.values()]):
+                cache["room"][room_key(rm.code)] = rm
 
         # TimetableSlot.room is required — some sessions in the source file
         # have no venue assigned yet, so fall back to a shared placeholder
@@ -165,7 +161,7 @@ class TimetablePersistenceService:
 
                 program = cache["program"].get(str(row["program_code"]).strip().lower())
                 unit = cache["unit"].get(str(row["unit_code"]).strip().lower())
-                room = cache["room"].get(str(row.get("room_code") or "").strip().lower()) or cache["room"]["__tba__"]
+                room = cache["room"].get(room_key(str(row.get("room_code") or ""))) or cache["room"]["__tba__"]
 
                 lec_id = str(row.get("lecturer_university_id") or "").strip().lower()
                 lecturer = cache["lecturer"].get(lec_id) if lec_id else None
@@ -202,6 +198,7 @@ class TimetablePersistenceService:
                     unit=unit,
                     program=program,
                     year_of_study=year_of_study_val,
+                    study_semester=row.get("study_semester") or None,
                     lecturer=lecturer,
                     room=room,
                     day_of_week=day_val,

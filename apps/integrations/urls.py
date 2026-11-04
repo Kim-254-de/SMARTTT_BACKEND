@@ -2,8 +2,8 @@ from django.urls import include, path
 
 from .directory_views import AttendanceDepartmentView, AttendanceDepartmentsView
 from .exam_views import ExamCloseView, ExamModeView, ExamPublishView, ExamSwitchView
-from .generator_views import GeneratorPublicationView, GeneratorPublishView
-from .unit_enrolment import AttendanceUnitEnrolmentView, GeneratorRoomsView
+from .generator_views import GeneratorPublicationView, GeneratorPublishView, GeneratorSetCurrentView, GeneratorTermsView
+from .unit_enrolment import AttendanceUnitEnrolmentView, GeneratorProgramsView, GeneratorRoomsView, GeneratorUnitEnrolmentView
 
 from .views import (
     AttendanceAuthenticateView,
@@ -57,12 +57,16 @@ urlpatterns = [
         name="integrations-generator-publication",
     ),
     # The exam timetable and switching the term to exams (exam_publish.py, exam_mode.py).
+    path("generator/terms/", GeneratorTermsView.as_view(), name="integrations-generator-terms"),
+    path("generator/set-current/", GeneratorSetCurrentView.as_view(), name="integrations-generator-set-current"),
     path("generator/exam-publish/", ExamPublishView.as_view(), name="integrations-generator-exam-publish"),
     path("generator/exam-mode/", ExamModeView.as_view(), name="integrations-generator-exam-mode"),
     path("generator/exam-switch/", ExamSwitchView.as_view(), name="integrations-generator-exam-switch"),
     path("generator/exam-close/", ExamCloseView.as_view(), name="integrations-generator-exam-close"),
     # How many students synced each unit, by class row, for exam papers; the rooms the admin uploaded (unit_enrolment.py).
     path("attendance/unit-enrolment/", AttendanceUnitEnrolmentView.as_view(), name="integrations-attendance-unit-enrolment"),
+    path("generator/unit-enrolment/", GeneratorUnitEnrolmentView.as_view(), name="integrations-generator-unit-enrolment"),
+    path("generator/programs/", GeneratorProgramsView.as_view(), name="integrations-generator-programs"),
     path("generator/rooms/", GeneratorRoomsView.as_view(), name="integrations-generator-rooms"),
     # SMARTTT's admin functions for the unified admin console (acting_admin.py).
     path("admin/", include("apps.integrations.admin_urls")),

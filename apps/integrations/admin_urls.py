@@ -75,6 +75,11 @@ urlpatterns = [
     path("staff-ids/uploads/<uuid:pk>/", view(StaffIDUploadDeleteView), name="admin-staff-id-upload-delete"),
     path("staff-ids/<uuid:pk>/", view(StaffIDDeleteView), name="admin-staff-id-delete"),
     # rooms/rooms/upload/, rooms/rooms/capacity-summary/
+    path("rooms/", viewset(RoomViewSet, {"get": "everything", "post": "create"}), name="admin-rooms"),
+    path("rooms/duplicates/", viewset(RoomViewSet, {"get": "duplicates"}), name="admin-rooms-duplicates"),
+    path("rooms/merge-duplicates/", viewset(RoomViewSet, {"post": "merge_duplicates"}), name="admin-rooms-merge-duplicates"),
+    path("rooms/merge/", viewset(RoomViewSet, {"post": "merge"}), name="admin-rooms-merge"),
+    path("rooms/<uuid:pk>/", viewset(RoomViewSet, {"patch": "partial_update"}), name="admin-room"),
     path("rooms/upload/", viewset(RoomViewSet, {"post": "upload"}), name="admin-rooms-upload"),
     path("rooms/capacity-summary/", viewset(RoomViewSet, {"get": "capacity_summary"}), name="admin-rooms-capacity"),
     # programs/programs/ (the old admin page asked for core/programs/, which never existed)

@@ -96,8 +96,117 @@ class UnitEnrolmentTests(APITestCase):
         unit = self.post(["COSC 130"]).data["units"]["COSC 130"]
         self.assertEqual(unit["lecturers"], [{"staff_number": "STF/0001", "name": "Jane L"}])
 
+    def slot(self, unit, program=None, year=2, stream="", day="mon", study_semester=None, term=None):
+        room, _ = Room.objects.get_or_create(code="LH1", defaults={"name": "LH1", "building": "Main", "capacity": 100})
+        TimetableSlot.objects.create(
+            term=term or self.term, unit=unit, program=program or self.bsc, year_of_study=year, stream=stream,
+            study_semester=study_semester, room=room, day_of_week=day, start_time=time(8), end_time=time(10),
+        )
+
+    @staticmethod
+    def classes(unit):
+        return [(r["program"], r["year_of_study"], r["study_semester"], r["stream"], r["students"]) for r in unit["rows"]]
+
+    def test_the_master_timetable_names_the_classes_when_nobody_synced(self):
+        bed = Program.objects.create(department=self.cs, code="BED.SCI", name="BEd Science")
+        self.slot(self.math, study_semester=2)
+        self.slot(self.math, day="wed", study_semester=2)  # another meeting of one class: still one row
+        self.slot(self.math, program=bed, year=3, stream="1", study_semester=1)
+        self.slot(self.math, program=bed, year=3, stream="2", study_semester=1)
+        self.slot(self.cosc, program=bed, year=1, term=self.old)  # another term: not this one's class
+        body = self.post(["MATH 241", "COSC 130"]).data
+        self.assertEqual(body["unknown"], [])
+        self.assertEqual(body["units"]["COSC 130"]["rows"], [])
+        unit = body["units"]["MATH 241"]
+        self.assertEqual(unit["students"], 0)
+        self.assertEqual(
+            self.classes(unit), [("BED.SCI", 3, 1, "1", 0), ("BED.SCI", 3, 1, "2", 0), ("BSC.CS", 2, 2, "", 0)]
+        )
+        self.assertEqual({r["sitting"] for r in unit["rows"]}, {"regular"})
+
+    def test_a_synced_class_on_the_timetable_is_one_row_with_its_students(self):
+        self.slot(self.math, study_semester=1)
+        self.sync(self.student(), self.math)
+        self.sync(self.student(), self.math)
+        unit = self.post(["MATH 241"]).data["units"]["MATH 241"]
+        self.assertEqual(self.classes(unit), [("BSC.CS", 2, 1, "", 2)])
+
+    def test_synced_students_of_a_class_not_on_the_timetable_still_count(self):
+        self.slot(self.math, year=3, study_semester=1)
+        self.sync(self.student(year=2), self.math)
+        unit = self.post(["MATH 241"]).data["units"]["MATH 241"]
+        self.assertEqual(self.classes(unit), [("BSC.CS", 2, 1, "", 1), ("BSC.CS", 3, 1, "", 0)])
+
+    def test_a_slot_that_doesnt_say_takes_the_programme_years_usual_semester(self):
+        self.slot(self.math)
+        for _ in range(2):
+            student = self.student()
+            Student.objects.filter(user=student).update(current_semester=2)
+        self.student()
+        unit = self.post(["MATH 241"]).data["units"]["MATH 241"]
+        self.assertEqual(self.classes(unit), [("BSC.CS", 2, 2, "", 0)])
+        self.slot(self.cosc, year=4)  # nobody to go by
+        self.assertEqual(self.classes(self.post(["COSC 130"]).data["units"]["COSC 130"]), [("BSC.CS", 4, 1, "", 0)])
+
+    def test_duplicate_programmes_are_one_class(self):
+        other = Department.objects.create(name="School of Computing", code="SOC")
+        dup = Program.objects.create(department=other, code="BSC.CS2", name="BSC computer  science")
+        self.slot(self.math, program=dup, study_semester=1)
+        self.sync(self.student(), self.math)
+        unit = self.post(["MATH 241"]).data["units"]["MATH 241"]
+        self.assertEqual(self.classes(unit), [("BSC.CS", 2, 1, "", 1)])
+
+    def test_the_generator_reads_the_same_classes_with_its_own_key(self):
+        self.slot(self.math, study_semester=1)
+        url = reverse("integrations-generator-unit-enrolment")
+        self.assertEqual(self.client.post(url, {"codes": ["MATH 241"]}, format="json", HTTP_X_API_KEY=ATT_KEY).status_code, 403)
+        unit = self.client.post(url, {"codes": ["MATH 241"]}, format="json", HTTP_X_API_KEY=GEN_KEY).data["units"]["MATH 241"]
+        self.assertEqual(self.classes(unit), [("BSC.CS", 2, 1, "", 0)])
+
+    def test_the_generator_reads_programme_codes_duplicates_as_one(self):
+        other = Department.objects.create(name="School of Computing", code="SOC")
+        Program.objects.create(department=other, code="BSC.CS2", name="BSC computer  science")
+        url = reverse("integrations-generator-programs")
+        self.assertEqual(self.client.get(url, HTTP_X_API_KEY=ATT_KEY).status_code, 403)
+        self.assertEqual([p["code"] for p in self.client.get(url, HTTP_X_API_KEY=GEN_KEY).data["programs"]], ["BSC.CS"])
+
     def test_the_generator_reads_the_admins_rooms(self):
         Room.objects.create(code="UTC 1", name="UTC 1", building="UTC", capacity=300)
         Room.objects.create(code="LAB 2", name="Lab", building="Main", capacity=40, room_type=Room.Type.LAB)
         rooms = self.client.get(ROOMS, HTTP_X_API_KEY=GEN_KEY).data["rooms"]
         self.assertEqual([(r["code"], r["capacity"], r["status"]) for r in rooms], [("LAB 2", 40, "active"), ("UTC 1", 300, "active")])
+
+
+@override_settings(ATTENDANCE_API_KEY=ATT_KEY, GENERATOR_API_KEY=GEN_KEY)
+class GeneratorTermTests(APITestCase):
+    def setUp(self):
+        self.old = AcademicTerm.objects.create(
+            academic_year="2025/2026", semester=2, start_date=date(2026, 1, 6), end_date=date(2026, 4, 30), is_current=True
+        )
+        self.url = reverse("integrations-generator-set-current")
+
+    def post(self, body, key=GEN_KEY):
+        return self.client.post(self.url, body, format="json", HTTP_X_API_KEY=key)
+
+    def test_needs_the_generators_key(self):
+        self.assertEqual(self.post({"academic_year": "2025/2026", "semester": 2}, key="wrong").status_code, 403)
+
+    def test_makes_an_existing_term_current_and_lists_terms(self):
+        term = AcademicTerm.objects.create(
+            academic_year="2026/2027", semester=1, start_date=date(2026, 9, 7), end_date=date(2026, 12, 18)
+        )
+        res = self.post({"academic_year": "2026/2027", "semester": 1, "by": "Dee Director"})
+        self.assertEqual((res.status_code, res.data["id"], res.data["is_current"]), (200, str(term.pk), True))
+        self.old.refresh_from_db()
+        self.assertFalse(self.old.is_current)
+        listed = self.client.get(reverse("integrations-generator-terms"), HTTP_X_API_KEY=GEN_KEY).data["terms"]
+        self.assertEqual({t["id"]: t["is_current"] for t in listed}, {str(term.pk): True, str(self.old.pk): False})
+
+    def test_creates_the_term_with_its_dates_or_says_it_needs_them(self):
+        res = self.post({"academic_year": "2026/2027", "semester": 1})
+        self.assertEqual((res.status_code, res.data["code"]), (422, "term_dates_required"))
+        self.old.refresh_from_db()
+        self.assertTrue(self.old.is_current)
+        res = self.post({"academic_year": "2026/2027", "semester": 1, "term_start": "2026-09-07", "term_end": "2026-12-18"})
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(AcademicTerm.objects.get(pk=res.data["id"]).is_current)

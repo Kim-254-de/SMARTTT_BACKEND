@@ -151,7 +151,9 @@ def import_rooms(file_name: str, content: bytes) -> Dict[str, Any]:
         )
     header_index, columns = header
 
-    existing = {room.code.lower(): room for room in Room.objects.all()}
+    from apps.rooms.services.room_merge import room_key
+
+    existing = {room_key(room.code): room for room in Room.objects.all()}
     created, updated, unchanged = [], [], []
     errors = []
     seen_codes = {}
@@ -169,14 +171,14 @@ def import_rooms(file_name: str, content: bytes) -> Dict[str, Any]:
             if len(code) > MAX_CODE_LENGTH:
                 errors.append({"row": offset, "code": code, "error": f"Room code is longer than {MAX_CODE_LENGTH} characters."})
                 continue
-            if code.lower() in seen_codes:
+            if room_key(code) in seen_codes:
                 errors.append({
                     "row": offset,
                     "code": code,
-                    "error": f"Duplicate of row {seen_codes[code.lower()]}; this row was skipped.",
+                    "error": f"Duplicate of row {seen_codes[room_key(code)]}; this row was skipped.",
                 })
                 continue
-            seen_codes[code.lower()] = offset
+            seen_codes[room_key(code)] = offset
 
             try:
                 capacity = _parse_capacity(values["capacity"])
@@ -209,11 +211,11 @@ def import_rooms(file_name: str, content: bytes) -> Dict[str, Any]:
                 else:
                     changes["status"] = status
 
-            room = existing.get(code.lower())
+            room = existing.get(room_key(code))
             if room is None:
                 changes.setdefault("name", code)
                 room = Room.objects.create(code=code, **changes)
-                existing[code.lower()] = room
+                existing[room_key(code)] = room
                 created.append(code)
                 continue
 

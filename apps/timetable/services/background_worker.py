@@ -21,7 +21,7 @@ def _reapply_allocations(batch_id: str, academic_year: str) -> None:
     except Exception as exc:
         logger.exception(f"[Batch {batch_id}] Could not re-apply lecturer allocations: {exc}")
 
-def _process_timetable_async(batch_id: str, file_path: str, academic_year: str = "2026/2027"):
+def _process_timetable_async(batch_id: str, file_path: str, academic_year: str = "2026/2027", term_semester: int | None = None):
     """
     Background worker function executed in an isolated thread.
     Ensures database connection isolation and safe status updates.
@@ -41,7 +41,7 @@ def _process_timetable_async(batch_id: str, file_path: str, academic_year: str =
         parse_result = parse_pdf(file_path)
         
         # 2. Normalize dictionaries
-        slot_dicts = to_timetable_slot_dicts(parse_result, academic_year=academic_year)
+        slot_dicts = to_timetable_slot_dicts(parse_result, academic_year=academic_year, term_semester=term_semester)
         batch.rows_received = len(slot_dicts)
         batch.save(update_fields=["rows_received"])
 
@@ -73,11 +73,13 @@ def _process_timetable_async(batch_id: str, file_path: str, academic_year: str =
         connection.close()
 
 
-def dispatch_async_upload(batch: TimetableUploadBatch, file_path: str, academic_year: str = "2026/2027"):
+def dispatch_async_upload(
+    batch: TimetableUploadBatch, file_path: str, academic_year: str = "2026/2027", term_semester: int | None = None
+):
     """Spawns an asynchronous daemon thread to run the parsing task."""
     worker_thread = threading.Thread(
         target=_process_timetable_async,
-        args=(str(batch.id), file_path, academic_year),
+        args=(str(batch.id), file_path, academic_year, term_semester),
         daemon=True,
     )
     worker_thread.start()
