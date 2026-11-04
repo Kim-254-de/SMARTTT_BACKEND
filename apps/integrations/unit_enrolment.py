@@ -225,6 +225,17 @@ class GeneratorUnitEnrolmentView(APIView):
         return Response(unit_enrolment(query.validated_data["codes"]))
 
 
+class GeneratorProgramsView(APIView):
+    """GET generator/programs/: programme codes and names, to match the classes named in a moderation letter."""
+
+    authentication_classes: list = []
+    permission_classes = [HasGeneratorApiKey]
+
+    def get(self, request):
+        one_code = _program_code_names()
+        return Response({"programs": sorted(({"code": c, "name": n} for c, n in set(one_code.values())), key=lambda p: p["code"])})
+
+
 class GeneratorRoomsView(APIView):
     authentication_classes: list = []
     permission_classes = [HasGeneratorApiKey]
