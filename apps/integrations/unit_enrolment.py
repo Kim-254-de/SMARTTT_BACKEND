@@ -226,6 +226,7 @@ class GeneratorRoomsView(APIView):
                         "name": r.name,
                         "building": r.building,
                         "capacity": r.capacity,
+                        "capacity_confirmed": r.capacity_confirmed,
                         "room_type": r.room_type,
                         "status": r.status,
                         "for_exams": r.for_exams,

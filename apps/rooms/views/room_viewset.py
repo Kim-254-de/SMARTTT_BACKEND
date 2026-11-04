@@ -8,6 +8,7 @@ from apps.common.permissions import IsAdminOrReadOnly
 from apps.rooms.models import Room
 from apps.rooms.serializers import RoomSerializer
 from apps.rooms.services.room_import import RoomImportError, capacity_summary, import_rooms
+from apps.rooms.services.room_merge import duplicate_groups, merge_all, merge_rooms
 
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
@@ -49,6 +50,36 @@ class RoomViewSet(ModelViewSet):
         """Every venue, unpaged, for the admin's table (the placeholder TBA room left out)."""
         rooms = Room.objects.exclude(code="TBA").order_by("building", "code")
         return Response({"rooms": RoomSerializer(rooms, many=True).data})
+
+    @action(detail=False, methods=["get"], url_path="duplicates", permission_classes=[IsAdminUser])
+    def duplicates(self, request):
+        """Rooms known by more than one code ("TC1", "TC 1"), and what merging would do. Changes nothing."""
+        return Response({"groups": duplicate_groups()})
+
+    @action(detail=False, methods=["post"], url_path="merge-duplicates", permission_classes=[IsAdminUser])
+    def merge_duplicates(self, request):
+        """Folds every such group into one room; slots and exam seats move with it."""
+        result = merge_all()
+        self._after_merge()
+        return Response(result)
+
+    @action(detail=False, methods=["post"], url_path="merge", permission_classes=[IsAdminUser])
+    def merge(self, request):
+        """{keep, merge: [ids]}: rooms the admin knows are one, whatever their codes ("Conference Hall", "ED 4")."""
+        keep = Room.objects.filter(pk=request.data.get("keep")).first()
+        ids = request.data.get("merge") or []
+        others = list(Room.objects.filter(pk__in=ids).exclude(code="TBA"))
+        if keep is None or keep.code == "TBA" or not others or len(others) != len(ids) or keep in others:
+            return Response({"detail": "Choose the venue to keep and at least one other venue to merge into it."}, status=400)
+        result = merge_rooms(keep, others)
+        self._after_merge()
+        return Response(result)
+
+    @staticmethod
+    def _after_merge():
+        from apps.common.services.cache_service import PersonalizationCacheService
+
+        PersonalizationCacheService.clear_all()
 
     @action(detail=False, methods=["get"], url_path="capacity-summary", permission_classes=[IsAdminUser])
     def capacity_summary(self, request):

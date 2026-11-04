@@ -48,6 +48,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from apps.rooms.models import Room
+from apps.rooms.services.room_merge import room_key
 from apps.timetable.models import AcademicTerm, ExamPaper, ExamPublication, ExamSeating, Practical
 
 from .services import find_lecturer_account
@@ -253,7 +254,9 @@ def _rooms(data: dict) -> dict[str, Room]:
     """Each room the papers use, by code; a room sent in `rooms` that SMARTTT lacks is created."""
     wanted = {_code(s["room_code"]) for p in data["papers"] for s in p["seating"]}
     sent = {_code(r["code"]): r for r in data.get("rooms") or []}
-    found = {_code(r.code): r for r in Room.objects.all() if _code(r.code) in wanted}
+    # "TC1" and "TC 1" are one room: found under either code, never made again.
+    known = {room_key(r.code): r for r in Room.objects.all()}
+    found = {code: known[room_key(code)] for code in wanted if room_key(code) in known}
     missing = sorted(wanted - set(found) - set(sent))
     if missing:
         raise ExamPublishRefused(
