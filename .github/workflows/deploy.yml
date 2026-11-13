@@ -1,0 +1,60 @@
+# Deploys main to the university's KENET VMs on every push to it.
+#
+# 1. build: the image, tagged with the commit, with NumPy 2.3.5 (the newest that starts on KENET's
+#    CPUs, which lack SSE4.2/AVX), checked to import, pushed to ghcr.io.
+# 2. deploy: /opt/nextup/deploy.sh on vm-app (the only command the deploy key may run) pulls it with
+#    this job's short-lived token, restarts smarttt-web (and smarttt-cron, which shares the image;
+#    migrations run as smarttt-web starts) and checks they come up, else puts the previous image back.
+#
+# Needs the `kenet` environment's KENET_DEPLOY_KEY and KENET_KNOWN_HOSTS (setup-ci.sh in the deploy
+# kit). Run it by hand from the Actions tab to redeploy a commit.
+name: Deploy to KENET
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: kenet-deploy-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  SHA: ${{ github.sha }}
+  REGISTRY: ghcr.io/kim-254-de
+  VM_APP: 197.137.65.49
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and push nextup-smarttt
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          image="$REGISTRY/nextup-smarttt:$SHA"
+          docker build --pull -t base \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
+            --label "org.opencontainers.image.revision=$SHA" .
+          user=$(docker image inspect -f '{{.Config.User}}' base)
+          printf 'FROM base\nUSER root\nRUN pip install --no-cache-dir --no-deps numpy==2.3.5\nUSER %s\n' "${user:-root}" | docker build -t "$image" -
+          docker run --rm --entrypoint python "$image" -c 'import numpy, pandas, PIL.Image, argon2; assert numpy.__version__ == "2.3.5", numpy.__version__'
+          docker push "$image"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: kenet
+    permissions: { packages: read }
+    steps:
+      - name: Deploy smarttt
+        env:
+          KEY: ${{ secrets.KENET_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.KENET_KNOWN_HOSTS }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf '%s' "$TOKEN" | ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=30 "user@$VM_APP" "deploy smarttt $SHA"
